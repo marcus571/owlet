@@ -3,7 +3,7 @@
 # 路径：Kconfig
 #
 # 2026-11-11 修改记录：
-#   新增 USB 充电器识别与电流配置选项。
+#   新增充电轮询间隔配置，完善充电状态广播机制。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -75,5 +75,11 @@ config OWLET_CHARGER_SEL_SETTLE_MS
 config OWLET_CHARGER_DETECT_WAIT_MS
 	int "BQ25601D BC1.2 检测等待时间 (ms)"
 	default 100
+
+config OWLET_CHARGER_POLL_INTERVAL_MS
+	int "充电状态轮询间隔 (ms)"
+	default 1000
+	help
+	  充电期间读取电量、温度和充电状态的周期。
 
 endif # OWLET_USB_CHARGER_SWITCH
