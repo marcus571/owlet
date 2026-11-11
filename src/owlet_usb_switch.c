@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 移除所有 DEBUG 级别打印，防止系统崩溃。
- *   2. 将检测调度延迟设为 1500ms，避免抢占 D+/D- 导致 USB 枚举失败。
+ *   1. 增加 is_detecting 互斥锁，防止切换 D+/D- 时误触发断开事件导致 UI 死循环。
+ *   2. 充电结束判断改为在 poll_handler 中读取 REG08 的 VBUS_STAT 状态。
  */
 
 #include <zephyr/kernel.h>
@@ -48,6 +48,7 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 static struct k_work_delayable detect_work;
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
+static bool is_detecting = false; /* 互斥标志，防止总线切换导致误判 */
 
 /* NTC 参数 */
 #define NTC_R25_OHM             10000.0f
@@ -105,14 +106,27 @@ static void poll_handler(struct k_work *work) {
     if (raw_soc <= 100) soc = raw_soc;
 
     read_battery_temperature(&temp);
+    
+    /* 读取状态寄存器 */
     if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
         vbus_stat = (reg08 & REG08_VBUS_STAT_MASK) >> 5;
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
+    /* 
+     * 判断拔出逻辑：
+     * 如果 VBUS_STAT 为 0，说明没有输入电源了，线被拔了。
+     * 此时主动抛出 false 事件并停止轮询。
+     */
+    if (vbus_stat == 0) {
+        k_work_cancel_delayable(&poll_work);
+        struct owlet_charger_state_changed ev = { .is_charging = false };
+        raise_owlet_charger_state_changed(ev);
+        LOG_INF("Power removed, sent is_charging = false");
+        return;
+    }
+
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
-    
-    /* 仅使用 INFO 级别打印一行，避免系统卡顿 */
     LOG_INF("Charger: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, dur=%us",
             soc, temp, vbus_stat, chrg_stat, duration);
 
@@ -126,7 +140,6 @@ static void poll_handler(struct k_work *work) {
         .battery_temp_c = temp,
         .charge_duration_s = duration,
     };
-    
     raise_owlet_charger_state_changed(ev);
 
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
@@ -137,6 +150,8 @@ static void detect_handler(struct k_work *work) {
     uint8_t val;
     uint8_t vbus_stat = 0;
 
+    is_detecting = true; /* 标记正在检测，屏蔽 ZMK 的掉线事件 */
+    
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
     k_msleep(CONFIG_OWLET_CHARGER_SEL_SETTLE_MS);
 
@@ -158,8 +173,11 @@ static void detect_handler(struct k_work *work) {
     }
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
+    is_detecting = false;
 
     charge_start_time = k_uptime_get();
+    
+    /* 启动定时器 */
     poll_handler(NULL); 
 }
 
@@ -167,13 +185,21 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            /* 延时 1500ms 后再进行切换，确保电脑端有足够时间完成 USB 枚举 */
-            k_work_reschedule(&detect_work, K_MSEC(1500)); 
+            /* 只有在没在检测时，才调度检测任务 */
+            if (!is_detecting) {
+                k_work_reschedule(&detect_work, K_MSEC(1500)); 
+            }
         } else {
-            k_work_cancel_delayable(&poll_work);
-            k_work_cancel_delayable(&detect_work);
-            struct owlet_charger_state_changed ev = { .is_charging = false };
-            raise_owlet_charger_state_changed(ev);
+            /* 
+             * 如果是主动切换总线导致的断开（is_detecting == true），忽略它。
+             * 只有真正的外部断开，才取消轮询（其实 poll_handler 里的 vbus_stat == 0 已经兜底了）。
+             */
+            if (!is_detecting) {
+                k_work_cancel_delayable(&poll_work);
+                k_work_cancel_delayable(&detect_work);
+                struct owlet_charger_state_changed ev = { .is_charging = false };
+                raise_owlet_charger_state_changed(ev);
+            }
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
