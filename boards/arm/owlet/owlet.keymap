@@ -3,8 +3,7 @@
  * 路径：boards/arm/owlet/owlet.keymap
  *
  * 2026-11-11 修改记录：
- *   改为 3行4列 布局。
- *   新增 Fn 层 (Layer 1)，保留原有的蓝牙清空与 RGB 切换功能。
+ *   Fn 层第三行第一列加入 &screen_swap（切换系统屏/充电屏）。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -29,9 +28,9 @@
 		// Fn 层 (Layer 1) - 按住第一行的 Fn 键触发
 		fn_layer {
 			bindings = <
-				&trans      &trans        &trans          &trans
-				&trans      &trans        &trans          &trans
-				&trans      &bt BT_CLR_ALL &owlet_rgb_toggle &trans
+				&trans      &trans          &trans            &trans
+				&trans      &trans          &trans            &trans
+				&screen_swap &bt BT_CLR_ALL &owlet_rgb_toggle &trans
 			>;
 		};
 	};
