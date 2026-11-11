@@ -3,9 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-12 修改记录：
- *   1. 修复充电器类型误报：引入全局 detected_vbus_stat，在初次检测时锁定类型。
- *   2. 轮询期间不再重新读取 REG08 的 VBUS_STAT，防止 D+/D- 切走后读到 0。
- *   3. 轮询时同步上报正确的 iindpm_ma 和 ichg_ma。
+ *   1. 增加 CDP (USB CDP, VBUS_STAT=2) 的处理逻辑，将其归一化为 SDP (1)。
+ *   2. 修复 detected_vbus_stat 锁定，确保 UI 端只接收 1(USB) 或 3(CHG)。
  */
 
 #include <zephyr/kernel.h>
@@ -52,7 +51,7 @@ static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
 /* 记录初次检测的结果，防止后续轮询被切走的 D+/D- 污染 */
-static uint8_t detected_vbus_stat = 0;
+static uint8_t detected_vbus_stat = 1; /* 默认 1，避免发 0 给 UI */
 static uint16_t detected_iindpm = 0;
 static uint16_t detected_ichg = 0;
 
@@ -115,7 +114,6 @@ static void poll_handler(struct k_work *work) {
 
     read_battery_temperature(&temp);
     
-    /* 只读充电状态位，不再读 VBUS_STAT，直接用 detected_vbus_stat */
     if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
@@ -147,7 +145,7 @@ static void disconnect_handler(struct k_work *work) {
 
 static void detect_handler(struct k_work *work) {
     uint8_t val;
-    uint8_t vbus_stat = 0;
+    uint8_t raw_vbus_stat = 0;
 
     last_detect_time = k_uptime_get();
     
@@ -160,21 +158,26 @@ static void detect_handler(struct k_work *work) {
     k_msleep(CONFIG_OWLET_CHARGER_DETECT_WAIT_MS);
 
     if (bq_read_reg(BQ25601D_REG08, &val) == 0) {
-        vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
+        raw_vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
     }
+    
+    /* 打印原始寄存器值，方便后期排查 */
+    LOG_INF("Raw BQ25601D VBUS_STAT: %d", raw_vbus_stat);
 
-    /* 记录初次检测的结果，并配置电流 */
-    detected_vbus_stat = vbus_stat;
-    if (vbus_stat == 1) {
+    /* 归一化处理：1(SDP) 和 2(CDP) 全部当作 USB (1) 处理 */
+    if (raw_vbus_stat == 1 || raw_vbus_stat == 2) {
+        detected_vbus_stat = 1; 
         detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
         configure_charger(detected_iindpm, detected_ichg);
-    } else if (vbus_stat == 3) {
+    } else if (raw_vbus_stat == 3) {
+        detected_vbus_stat = 3; 
         detected_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
         configure_charger(detected_iindpm, detected_ichg);
     } else {
-        /* 未知电源保底 */
+        /* 未知电源依然按 SDP 保底，确保 UI 不会收到 0 */
+        detected_vbus_stat = 1; 
         detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
         configure_charger(detected_iindpm, detected_ichg);
