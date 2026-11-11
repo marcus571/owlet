@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   临时注释掉检测调度，确保 USB 插入时 FSUSB43 不切换总线，
- *   以便电脑能够顺利枚举出 USB CDC ACM 串口并输出日志。
+ *   1. 移除所有 DEBUG 级别打印，防止系统崩溃。
+ *   2. 将检测调度延迟设为 1500ms，避免抢占 D+/D- 导致 USB 枚举失败。
  */
 
 #include <zephyr/kernel.h>
@@ -101,23 +101,21 @@ static void poll_handler(struct k_work *work) {
     int16_t temp = 0;
     uint8_t soc = 0;
 
-    /* 读取电池 SOC */
     uint8_t raw_soc = zmk_battery_state_of_charge();
     if (raw_soc <= 100) soc = raw_soc;
 
-    /* 读取温度和状态 */
     read_battery_temperature(&temp);
     if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
         vbus_stat = (reg08 & REG08_VBUS_STAT_MASK) >> 5;
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
-    /* 打印日志，方便调试 */
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
-    LOG_INF("Charger state: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, duration=%us",
+    
+    /* 仅使用 INFO 级别打印一行，避免系统卡顿 */
+    LOG_INF("Charger: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, dur=%us",
             soc, temp, vbus_stat, chrg_stat, duration);
 
-    /* 抛出状态 */
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
         .vbus_stat = vbus_stat,
@@ -131,7 +129,6 @@ static void poll_handler(struct k_work *work) {
     
     raise_owlet_charger_state_changed(ev);
 
-    /* 重新调度自己 */
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 }
 
@@ -170,17 +167,13 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            /* 
-             * 【调试用：临时注释】
-             * 先不调度 detect_work，不拉高 SEL，确保 USB 正常枚举。
-             */
-            // k_work_reschedule(&detect_work, K_MSEC(20));
-            LOG_INF("USB powered. FSUSB43 detect temporarily disabled for debugging.");
+            /* 延时 1500ms 后再进行切换，确保电脑端有足够时间完成 USB 枚举 */
+            k_work_reschedule(&detect_work, K_MSEC(1500)); 
         } else {
             k_work_cancel_delayable(&poll_work);
+            k_work_cancel_delayable(&detect_work);
             struct owlet_charger_state_changed ev = { .is_charging = false };
             raise_owlet_charger_state_changed(ev);
-            LOG_INF("USB unplugged, sent is_charging = false");
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
