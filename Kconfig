@@ -2,8 +2,8 @@
 # 仓库根目录的 Kconfig
 # 路径：Kconfig
 #
-# 2026-11-05 17:00 修改记录：
-#   移除 OWLET_BLE_LED_CONNECTED_TIMEOUT_MIN 选项。
+# 2026-11-11 修改记录：
+#   新增 USB 充电器识别与电流配置选项。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -27,3 +27,53 @@ config OWLET_BLE_LED_USB_COUNTS_AS_CONNECTED
 	bool "USB 已连接（HID 就绪）也视为已连接并常亮"
 	default n
 endif
+
+menuconfig OWLET_USB_CHARGER_SWITCH
+	bool "Owlet USB 充电器自动识别与电流配置"
+	default y
+	help
+	  通过 FSUSB43 切换 D+/D- 并配置 BQ25601D 的输入限流与充电电流。
+
+if OWLET_USB_CHARGER_SWITCH
+
+config OWLET_CHARGER_SEL_GPIO_PIN
+	int "FSUSB43 SEL 控制引脚（P0）"
+	default 11
+
+config OWLET_CHARGER_I2C_ADDR
+	hex "BQ25601D I2C 地址"
+	default 0x6B
+
+config OWLET_CHARGER_SDP_IINDPM_MA
+	int "电脑 USB (SDP) 输入限流 (mA)"
+	default 300
+	help
+	  配置 BQ25601D 的 IINDPM (步进 100mA)。
+
+config OWLET_CHARGER_DCP_IINDPM_MA
+	int "充电器 (DCP) 输入限流 (mA)"
+	default 500
+	help
+	  配置 BQ25601D 的 IINDPM (步进 100mA)。
+
+config OWLET_CHARGER_SDP_ICHG_MA
+	int "电脑 USB (SDP) 电池充电电流 (mA)"
+	default 300
+	help
+	  配置 BQ25601D 的 ICHG (步进 60mA)。
+
+config OWLET_CHARGER_DCP_ICHG_MA
+	int "充电器 (DCP) 电池充电电流 (mA)"
+	default 500
+	help
+	  配置 BQ25601D 的 ICHG (步进 60mA)。
+
+config OWLET_CHARGER_SEL_SETTLE_MS
+	int "FSUSB43 SEL 切换稳定时间 (ms)"
+	default 10
+
+config OWLET_CHARGER_DETECT_WAIT_MS
+	int "BQ25601D BC1.2 检测等待时间 (ms)"
+	default 100
+
+endif # OWLET_USB_CHARGER_SWITCH
