@@ -3,9 +3,8 @@
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-11 修改记录（指示灯引脚调整）：
- *   Caps Lock 指示灯由 P0.09 改为 P0.30。
- *   Num Lock 指示灯由 P1.06 改为 P0.28。
+ * 2026-11-11 修改记录（EC11 相序调整）：
+ *   互换 a-gpios 和 b-gpios，修正旋转方向。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -46,17 +45,16 @@
 	leds {
 		compatible = "gpio-leds";
 		blue_led: led_0 { gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>; label = "Blue LED"; };
-		/* 修改：Caps Lock 改为 P0.30 */
 		caps_lock_led: led_1 { gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>; label = "Caps Lock LED"; };
-		/* 修改：Num Lock 改为 P0.28 */
 		num_lock_led: led_2 { gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>; label = "Num Lock LED"; };
 	};
 
 	left_encoder: encoder_left {
 		compatible = "alps,ec11";
 		label = "LEFT_ENCODER";
-		a-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		b-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		/* 修改：互换 A/B 相引脚 */
+		a-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		b-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		steps = <80>;
 		status = "disabled";
 	};
@@ -178,7 +176,6 @@ nice_view_spi: &spi1 {
 		reg = <0x36>;
 	};
 
-	/* BQ25601D 挂载 */
 	bq25601d: bq25601d@6b {
 		compatible = "ti,bq25601d";
 		reg = <0x6b>;
