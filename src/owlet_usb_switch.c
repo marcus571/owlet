@@ -8,6 +8,7 @@
  *
  * 2026-11-11 修改记录：
  *   GPIO 控制改为直接获取 gpio0 设备并控制 pin 11，避免复杂的 DTS 节点定义。
+ *   修正 USB 事件结构体成员：ev->state 改为 ev->conn_state。
  *   当前为保守值：SDP 300mA，DCP 500mA。
  */
 
@@ -108,7 +109,7 @@ static void usb_detect_handler(struct k_work *work) {
 /* USB 状态变化事件回调 */
 static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
-    if (ev && ev->state == ZMK_USB_CONN_POWERED) {
+    if (ev && ev->conn_state == ZMK_USB_CONN_POWERED) {
         /* 在 USB 刚上电未枚举时触发检测 */
         k_work_reschedule(&usb_detect_work, K_MSEC(20));
     }
