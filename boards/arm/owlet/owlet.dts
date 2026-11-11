@@ -3,11 +3,11 @@
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-06 回退记录（RGB灯带总线）：
- *   将 RGB 灯带的控制总线从 SPI2 回退至 SPI3。
- *   原因：Zephyr 的 WS2812 SPI 驱动在 nRF52840 的 SPI0/1/2 上存在已知 Bug，
- *   会导致灯带无法工作。SPI3 是 ZMK 官方推荐的稳定方案。
- *   （SPI3 的潜在漏电问题可通过物理电源开关规避）
+ * 2026-11-11 修改记录（引脚调整）：
+ *   1. EC11编码器：音量减小P1.08，音量增大P0.07。
+ *   2. MAX17048 I2C：SDA P0.06，SCL P0.26。
+ *   3. 屏幕 nice!view：SCS P0.12，SI P1.09，SCLK P0.08。
+ *   4. WS2812B 灯带：灯珠数量改为11，控制引脚改为 P0.29。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -55,8 +55,9 @@
 	left_encoder: encoder_left {
 		compatible = "alps,ec11";
 		label = "LEFT_ENCODER";
-		a-gpios = <&gpio0 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		b-gpios = <&gpio0 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		/* 修改：A相(音量增大) P0.07，B相(音量减小) P1.08 */
+		a-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		b-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		steps = <80>;
 		status = "disabled";
 	};
@@ -67,7 +68,6 @@
 		triggers-per-rotation = <20>;
 	};
 
-	/* 修改：矩阵转换为 3 行 4 列 */
 	default_transform: keymap_transform_0 {
 		compatible = "zmk,matrix-transform";
 		columns = <4>;
@@ -79,7 +79,6 @@
 		>;
 	};
 
-	/* 修改：引脚变更为你指定的 3行4列 */
 	kscan0: kscan {
 		compatible = "zmk,kscan-gpio-matrix";
 		wakeup-source;
@@ -107,22 +106,24 @@
 &left_encoder { status = "okay"; };
 
 &pinctrl {
-	spi1_default: spi1_default { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 23)>, <NRF_PSEL(SPIM_MOSI, 0, 21)>; }; };
-	spi1_sleep: spi1_sleep { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 23)>, <NRF_PSEL(SPIM_MOSI, 0, 21)>; low-power-enable; }; };
+	/* 修改：屏幕 SPI1 引脚 SCLK P0.08, MOSI P1.09 */
+	spi1_default: spi1_default { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; }; };
+	spi1_sleep: spi1_sleep { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; low-power-enable; }; };
 	
-	/* 回退：恢复 spi3 的 pinctrl 定义 */
-	spi3_default: spi3_default { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 8)>; }; };
-	spi3_sleep: spi3_sleep { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 8)>; low-power-enable; }; };
+	/* 修改：灯带 SPI3 引脚 MOSI P0.29 */
+	spi3_default: spi3_default { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; }; };
+	spi3_sleep: spi3_sleep { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; low-power-enable; }; };
 	
+	/* 修改：MAX17048 I2C0 引脚 SCL P0.26, SDA P0.06 */
 	i2c0_default: i2c0_default { 
 		group1 { 
-			psels = <NRF_PSEL(TWIM_SCL, 0, 12)>, <NRF_PSEL(TWIM_SDA, 1, 9)>; 
+			psels = <NRF_PSEL(TWIM_SCL, 0, 26)>, <NRF_PSEL(TWIM_SDA, 0, 6)>; 
 			bias-pull-up;
 		}; 
 	};
 	i2c0_sleep: i2c0_sleep { 
 		group1 { 
-			psels = <NRF_PSEL(TWIM_SCL, 0, 12)>, <NRF_PSEL(TWIM_SDA, 1, 9)>; 
+			psels = <NRF_PSEL(TWIM_SCL, 0, 26)>, <NRF_PSEL(TWIM_SDA, 0, 6)>; 
 			bias-pull-up;
 			low-power-enable;
 		}; 
@@ -135,7 +136,8 @@ nice_view_spi: &spi1 {
 	pinctrl-0 = <&spi1_default>;
 	pinctrl-1 = <&spi1_sleep>;
 	pinctrl-names = "default", "sleep";
-	cs-gpios = <&gpio0 19 GPIO_ACTIVE_HIGH>;
+	/* 修改：屏幕 SCS P0.12 */
+	cs-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 
@@ -149,7 +151,6 @@ nice_view_spi: &spi1 {
 	};
 };
 
-/* 回退：将灯带节点恢复至 &spi3 */
 &spi3 {
 	compatible = "nordic,nrf-spim";
 	status = "okay";
@@ -162,7 +163,8 @@ nice_view_spi: &spi1 {
 		status = "okay";
 		reg = <0>;
 		spi-max-frequency = <4000000>;
-		chain-length = <8>;
+		/* 修改：灯珠数量改为 11 */
+		chain-length = <11>;
 		spi-one-frame = <0x70>;
 		spi-zero-frame = <0x40>;
 		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
@@ -170,7 +172,6 @@ nice_view_spi: &spi1 {
 };
 
 &i2c0 {
-	/* 恢复为 twim */
 	compatible = "nordic,nrf-twim";
 	status = "okay";
 	clock-frequency = <I2C_BITRATE_STANDARD>;
