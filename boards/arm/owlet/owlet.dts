@@ -3,9 +3,9 @@
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-11 修改记录（USB 充电切换）：
- *   BQ25601D 挂载节点（I2C 地址 0x6B）。
- *   移除 FSUSB43 SEL 节点，改为在 C 代码中直接控制 GPIO0 的 pin 11。
+ * 2026-11-11 修改记录（指示灯引脚调整）：
+ *   Caps Lock 指示灯由 P0.09 改为 P0.30。
+ *   Num Lock 指示灯由 P1.06 改为 P0.28。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -46,8 +46,10 @@
 	leds {
 		compatible = "gpio-leds";
 		blue_led: led_0 { gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>; label = "Blue LED"; };
-		caps_lock_led: led_1 { gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>; label = "Caps Lock LED"; };
-		num_lock_led: led_2 { gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>; label = "Num Lock LED"; };
+		/* 修改：Caps Lock 改为 P0.30 */
+		caps_lock_led: led_1 { gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>; label = "Caps Lock LED"; };
+		/* 修改：Num Lock 改为 P0.28 */
+		num_lock_led: led_2 { gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>; label = "Num Lock LED"; };
 	};
 
 	left_encoder: encoder_left {
