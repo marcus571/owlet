@@ -2,9 +2,9 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-02 修改记录：
- *   将第三行第二列的按键（原为数字 2，&kp N2）
- *   修改为清空所有蓝牙配对信息（&bt BT_CLR_ALL）。
+ * 2026-11-11 修改记录：
+ *   改为 3行4列 布局。
+ *   新增 Fn 层 (Layer 1)，保留蓝牙清空与 RGB 切换功能。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -15,14 +15,24 @@
 	keymap {
 		compatible = "zmk,keymap";
 
+		// 默认层 (Layer 0)
 		default_layer {
 			bindings = <
-				&kp CAPS    &kp KP_NUMLOCK   &kp C_MUTE
-				&kp A       &kp B            &kp C
-				&kp N1      &bt BT_CLR_ALL   &owlet_rgb_toggle
+				&mo 1       &kp CAPS      &kp KP_NUMLOCK  &kp C_MUTE
+				&kp A       &kp B         &kp C           &kp D
+				&kp N1      &kp N2        &kp N3          &kp N4
 			>;
 
 			sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
+		};
+
+		// Fn 层 (Layer 1) - 按住第一行的 Fn 键触发
+		fn_layer {
+			bindings = <
+				&trans      &trans        &trans          &trans
+				&trans      &trans        &trans          &trans
+				&trans      &bt BT_CLR_ALL &owlet_rgb_toggle &trans
+			>;
 		};
 	};
 };
