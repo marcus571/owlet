@@ -3,9 +3,7 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   新增 BQ25601D TS ADC 读取与 NTC 温度换算。
- *   新增抛出 owlet_charger_state_changed 事件，向 UI 广播充电状态。
- *   NTC 型号 103JT-025 (R25=10kΩ, B=3435K)，TS 分压电阻 5.23kΩ / 30.1kΩ。
+ *   修正事件结构体命名，统一为 owlet_charger_state_changed。
  */
 
 #include <zephyr/kernel.h>
@@ -29,8 +27,8 @@ LOG_MODULE_REGISTER(owlet_usb_switch, CONFIG_ZMK_LOG_LEVEL);
 #define BQ25601D_REG04          0x04 /* Battery Charge Current Limit */
 #define BQ25601D_REG07          0x07 /* Input Detection */
 #define BQ25601D_REG08          0x08 /* Charger Status */
-#define BQ25601D_REG0A          0x0A /* TS ADC 高字节 (TS_HI) */
-#define BQ25601D_REG0B          0x0B /* TS ADC 低字节 (TS_LO) */
+#define BQ25601D_REG0A          0x0A /* TS ADC 高字节 */
+#define BQ25601D_REG0B          0x0B /* TS ADC 低字节 */
 
 /* 寄存器掩码与偏移 */
 #define REG00_IINDPM_MASK       0x1F
@@ -51,7 +49,6 @@ static struct k_work_delayable usb_detect_work;
 #define NTC_T0_K                298.15f
 #define TS_R_TOP_OHM            5230.0f
 #define TS_R_BOT_OHM            30100.0f
-#define ADC_FULL_SCALE          32767.0f  /* 15-bit ADC 满量程，以实际芯片为准 */
 
 static int bq_read_reg(uint8_t reg, uint8_t *val) {
     return i2c_reg_read_byte(i2c_dev, BQ25601D_ADDR, reg, val);
@@ -61,34 +58,17 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
     return i2c_reg_write_byte(i2c_dev, BQ25601D_ADDR, reg, val);
 }
 
-/*
- * 读取 TS ADC 并换算为摄氏度。
- * 返回 0 成功，负值表示读取失败。
- */
 static int read_battery_temperature(int16_t *temp_c) {
     uint8_t hi, lo;
     if (bq_read_reg(BQ25601D_REG0A, &hi) != 0) return -EIO;
     if (bq_read_reg(BQ25601D_REG0B, &lo) != 0) return -EIO;
 
-    /*
-     * TS_HI 的 bit[3:0] 是 ADC 的高 4 位 (D11:D8)，
-     * TS_LO 的全部 8 位是 ADC 的低 8 位 (D7:D0)。
-     * 合计 12 位 ADC 码，范围 0 ~ 4095。
-     */
     uint16_t adc_code = ((uint16_t)(hi & 0x0F) << 8) | lo;
     if (adc_code == 0 || adc_code >= 4095) {
-        return -ERANGE; /* 开路或短路 */
+        return -ERANGE;
     }
 
-    /* V_TS / V_REGN = adc_code / 4095 */
     float ratio = (float)adc_code / 4095.0f;
-
-    /*
-     * ratio = R_parallel / (R_top + R_parallel)
-     * => R_parallel = ratio * R_top / (1 - ratio)
-     * 其中 R_parallel = (R_bot × R_ntc) / (R_bot + R_ntc)
-     * => R_ntc = R_parallel × R_bot / (R_bot - R_parallel)
-     */
     float r_parallel = (ratio * TS_R_TOP_OHM) / (1.0f - ratio);
     if (r_parallel >= TS_R_BOT_OHM) {
         return -ERANGE;
@@ -98,10 +78,9 @@ static int read_battery_temperature(int16_t *temp_c) {
         return -ERANGE;
     }
 
-    /* B 值方程：1/T = 1/T0 + (1/B) × ln(R_ntc / R25) */
     float inv_t = (1.0f / NTC_T0_K) + (1.0f / NTC_B_VALUE) * logf(r_ntc / NTC_R25_OHM);
     float temp_k = 1.0f / inv_t;
-    *temp_c = (int16_t)(temp_k - 273.15f + 0.5f); /* 四舍五入 */
+    *temp_c = (int16_t)(temp_k - 273.15f + 0.5f);
     return 0;
 }
 
@@ -162,7 +141,6 @@ static void usb_detect_handler(struct k_work *work) {
                           &actual_iindpm, &actual_ichg);
     }
 
-    /* 读取电池温度（SEL 尚未拉低，BQ25601D 仍在总线上） */
     if (read_battery_temperature(&battery_temp) != 0) {
         LOG_WRN("Failed to read battery temperature");
         battery_temp = 0;
@@ -170,8 +148,8 @@ static void usb_detect_handler(struct k_work *work) {
         LOG_INF("Battery temperature: %d C", battery_temp);
     }
 
-    /* 抛出事件，向 UI 广播本次检测结果 */
-    raise_owlet_charger_state_changed((struct owlet_charger_state){
+    /* 抛出事件，类型与头文件中的 struct owlet_charger_state_changed 匹配 */
+    raise_owlet_charger_state_changed((struct owlet_charger_state_changed){
         .vbus_stat = vbus_stat,
         .iindpm_ma = actual_iindpm,
         .ichg_ma = actual_ichg,
