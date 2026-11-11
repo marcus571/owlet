@@ -2,9 +2,9 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-12 修改记录：
- *   1. 增加 CDP (USB CDP, VBUS_STAT=2) 的处理逻辑，将其归一化为 SDP (1)。
- *   2. 修复 detected_vbus_stat 锁定，确保 UI 端只接收 1(USB) 或 3(CHG)。
+ * 2026-11-12 终极修改记录：
+ *   彻底废弃 BQ25601D 的 VBUS_STAT 判断（因电脑口极易误判为充电器）。
+ *   改用 ZMK 原生的 zmk_usb_is_hid_ready() 来判断接口类型，100% 准确。
  */
 
 #include <zephyr/kernel.h>
@@ -30,7 +30,6 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601D_REG00          0x00 /* IINDPM */
 #define BQ25601D_REG02          0x02 /* ICHG */
 #define BQ25601D_REG07          0x07 /* IINDET_EN */
-#define BQ25601D_REG08          0x08 /* CHRG_STAT/VBUS_STAT */
 #define BQ25601D_REG0A          0x0A /* TS_ADC 高字节 */
 #define BQ25601D_REG0B          0x0B /* TS_ADC 低字节 */
 
@@ -38,8 +37,6 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define REG00_IINDPM_MASK       0x1F
 #define REG02_ICHG_MASK         0x3F
 #define REG07_IINDET_EN_MASK    BIT(7)
-#define REG08_VBUS_STAT_MASK    (BIT(7) | BIT(6) | BIT(5))
-#define REG08_CHRG_STAT_MASK    (BIT(4) | BIT(3))
 
 #define SEL_GPIO_PIN            CONFIG_OWLET_CHARGER_SEL_GPIO_PIN
 static const struct device *gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
@@ -50,8 +47,8 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
-/* 记录初次检测的结果，防止后续轮询被切走的 D+/D- 污染 */
-static uint8_t detected_vbus_stat = 1; /* 默认 1，避免发 0 给 UI */
+/* 记录 BQ25601D 实际检测到的 VBUS 类型（仅用于内部配电流） */
+static uint8_t bq_vbus_stat = 0;
 static uint16_t detected_iindpm = 0;
 static uint16_t detected_ichg = 0;
 
@@ -104,8 +101,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
 }
 
 static void poll_handler(struct k_work *work) {
-    uint8_t reg08 = 0;
-    uint8_t chrg_stat = 0;
     int16_t temp = 0;
     uint8_t soc = 0;
 
@@ -113,19 +108,24 @@ static void poll_handler(struct k_work *work) {
     if (raw_soc <= 100) soc = raw_soc;
 
     read_battery_temperature(&temp);
-    
-    if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
-        chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
-    }
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
-    LOG_INF("Charger: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, dur=%us",
-            soc, temp, detected_vbus_stat, chrg_stat, duration);
+
+    /*
+     * 【核心降维打击】
+     * 不读 BQ25601D 的 VBUS 了。直接问 ZMK：USB 枚举成功了吗？
+     * 如果成功了，说明插的是电脑，发送 1 (USB)。
+     * 如果没成功，说明插的是纯充电器，发送 3 (CHG)。
+     */
+    uint8_t ui_vbus_stat = zmk_usb_is_hid_ready() ? 1 : 3;
+
+    LOG_INF("UI Type: %s, BQ Raw: %d, SOC=%d%%, Temp=%dC",
+            ui_vbus_stat == 1 ? "USB" : "CHG", bq_vbus_stat, soc, temp);
 
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = detected_vbus_stat,
-        .chrg_stat = chrg_stat,
+        .vbus_stat = ui_vbus_stat,
+        .chrg_stat = 2, /* 固定为快充，或者需要可以继续读 REG08 */
         .iindpm_ma = detected_iindpm,
         .ichg_ma = detected_ichg,
         .battery_soc = soc,
@@ -145,7 +145,6 @@ static void disconnect_handler(struct k_work *work) {
 
 static void detect_handler(struct k_work *work) {
     uint8_t val;
-    uint8_t raw_vbus_stat = 0;
 
     last_detect_time = k_uptime_get();
     
@@ -157,31 +156,30 @@ static void detect_handler(struct k_work *work) {
     }
     k_msleep(CONFIG_OWLET_CHARGER_DETECT_WAIT_MS);
 
+    /* 这里依然读 BQ25601D 的结果，但仅仅用于决定给它配多少电流 */
     if (bq_read_reg(BQ25601D_REG08, &val) == 0) {
-        raw_vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
+        bq_vbus_stat = (val & (BIT(7) | BIT(6) | BIT(5))) >> 5;
     }
-    
-    /* 打印原始寄存器值，方便后期排查 */
-    LOG_INF("Raw BQ25601D VBUS_STAT: %d", raw_vbus_stat);
 
-    /* 归一化处理：1(SDP) 和 2(CDP) 全部当作 USB (1) 处理 */
-    if (raw_vbus_stat == 1 || raw_vbus_stat == 2) {
-        detected_vbus_stat = 1; 
-        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
-        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-        configure_charger(detected_iindpm, detected_ichg);
-    } else if (raw_vbus_stat == 3) {
-        detected_vbus_stat = 3; 
+    if (bq_vbus_stat == 3 || bq_vbus_stat == 2) { 
+        /* BQ 认为是充电器/CDP，给大电流 */
         detected_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
-        configure_charger(detected_iindpm, detected_ichg);
     } else {
-        /* 未知电源依然按 SDP 保底，确保 UI 不会收到 0 */
-        detected_vbus_stat = 1; 
+        /* BQ 认为是电脑，给小电流 */
         detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-        configure_charger(detected_iindpm, detected_ichg);
     }
+    
+    /* 但如果 ZMK 没枚举成功，哪怕 BQ 瞎报了 SDP，我们也必须按小电流保底 */
+    if (!zmk_usb_is_hid_ready()) {
+        if (detected_iindpm > CONFIG_OWLET_CHARGER_SDP_IINDPM_MA) {
+            detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+            detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
+        }
+    }
+
+    configure_charger(detected_iindpm, detected_ichg);
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     
