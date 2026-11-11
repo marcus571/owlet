@@ -6,11 +6,9 @@
  *   实现 USB 插入后的 BQ25601D 充电类型检测与 IINDPM 动态配置。
  *   通过 FSUSB43 (P0.11) 切换 D+/D- 总线。
  *
- * 2026-11-11 修改记录（安全保守值）：
- *   SDP (电脑)  IINDPM = 300mA (值 3)
- *   DCP (充电器) IINDPM = 500mA (值 5)
- *   未知电源     IINDPM = 300mA (值 3)
- *   待实测验证识别逻辑无误后，再将 DCP 提高到 2A (值 20)。
+ * 2026-11-11 修改记录：
+ *   GPIO 控制改为直接获取 gpio0 设备并控制 pin 11，避免复杂的 DTS 节点定义。
+ *   当前为保守值：SDP 300mA，DCP 500mA。
  */
 
 #include <zephyr/kernel.h>
@@ -40,8 +38,10 @@ LOG_MODULE_REGISTER(owlet_usb_switch, CONFIG_ZMK_LOG_LEVEL);
 #define IINDPM_300MA            3
 #define IINDPM_500MA            5
 
-/* 设备树获取 FSUSB43 SEL 引脚 */
-static const struct gpio_dt_spec sel_pin = GPIO_DT_SPEC_GET(DT_NODELABEL(fsusb43_sel), gpios);
+/* FSUSB43 SEL 引脚定义 (P0.11) */
+#define SEL_GPIO_PIN            11
+static const struct device *gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+
 /* 获取 I2C 设备 */
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 
@@ -63,7 +63,7 @@ static void usb_detect_handler(struct k_work *work) {
     
     LOG_INF("USB Inserted, switching FSUSB43 to BQ25601D");
     /* 1. 将 SEL 拉高，把 D+/D- 交给 BQ25601D */
-    gpio_pin_set_dt(&sel_pin, 1);
+    gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
     k_msleep(10); // 等待开关切换稳定
 
     /* 2. 置位 IINDET_EN 强制重新检测 BC1.2 */
@@ -101,7 +101,7 @@ static void usb_detect_handler(struct k_work *work) {
     }
 
     /* 6. 配置完成，SEL 拉低，将 D+/D- 交还给 nRF52840 以进行 USB 枚举 */
-    gpio_pin_set_dt(&sel_pin, 0);
+    gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     LOG_INF("FSUSB43 handed back to nRF52840 for enumeration");
 }
 
@@ -120,12 +120,12 @@ ZMK_SUBSCRIPTION(owlet_usb_switch, zmk_usb_conn_state_changed);
 
 /* 初始化函数 */
 static int owlet_usb_switch_init(void) {
-    if (!device_is_ready(sel_pin.port)) {
-        LOG_ERR("FSUSB43 SEL pin not ready");
+    if (!device_is_ready(gpio0_dev)) {
+        LOG_ERR("GPIO0 not ready");
         return -ENODEV;
     }
     /* 初始化时默认输出低电平，连通 MCU */
-    gpio_pin_configure_dt(&sel_pin, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure(gpio0_dev, SEL_GPIO_PIN, GPIO_OUTPUT_INACTIVE);
     
     if (!device_is_ready(i2c_dev)) {
         LOG_ERR("I2C device not ready");
