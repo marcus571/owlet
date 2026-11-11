@@ -3,8 +3,7 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 引入 is_physically_plugged 状态位，彻底解决因切换 D+/D- 触发的系统反复枚举（提示音）。
- *   2. 优化断开防抖逻辑。
+ *   引入 USB 事件死区（3秒）。彻底解决因切换总线导致的系统反复枚举（提示音）。
  */
 
 #include <zephyr/kernel.h>
@@ -50,8 +49,9 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
-static bool is_detecting = false;
-static bool is_physically_plugged = false;
+/* 忽略所有 USB 事件的时间窗口（毫秒） */
+#define DETECT_DEAD_TIME_MS     3000 
+static int64_t last_detect_time = 0;
 
 /* NTC 参数 */
 #define NTC_R25_OHM             10000.0f
@@ -143,7 +143,8 @@ static void detect_handler(struct k_work *work) {
     uint8_t val;
     uint8_t vbus_stat = 0;
 
-    is_detecting = true;
+    /* 触发检测，立刻进入死区 */
+    last_detect_time = k_uptime_get();
     
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
     k_msleep(CONFIG_OWLET_CHARGER_SEL_SETTLE_MS);
@@ -167,33 +168,31 @@ static void detect_handler(struct k_work *work) {
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     
-    /* 给予电脑重新枚举的时间 */
-    k_msleep(100);
-    is_detecting = false;
-
     charge_start_time = k_uptime_get();
     poll_handler(NULL); 
 }
 
 static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
-    if (ev) {
-        if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            k_work_cancel_delayable(&disconnect_work);
-            
-            /* 只有真实插入且不在检测期间，才触发检测，防止重新枚举导致的死循环 */
-            if (!is_physically_plugged && !is_detecting) {
-                is_physically_plugged = true;
-                k_work_reschedule(&detect_work, K_MSEC(1000));
-            }
-        } else {
-            /* 只有在非检测期间发生断开，才是真实拔出 */
-            if (!is_detecting) {
-                is_physically_plugged = false;
-                k_work_cancel_delayable(&poll_work);
-                k_work_reschedule(&disconnect_work, K_MSEC(3000));
-            }
-        }
+    if (!ev) return ZMK_EV_EVENT_BUBBLE;
+
+    int64_t now = k_uptime_get();
+
+    /* 
+     * 核心修复：如果处于死区内（刚发生检测没多久），
+     * 屏蔽所有 USB 插入/拔出事件。
+     */
+    if (now - last_detect_time < DETECT_DEAD_TIME_MS) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    if (ev->conn_state == ZMK_USB_CONN_POWERED) {
+        k_work_cancel_delayable(&disconnect_work);
+        k_work_reschedule(&detect_work, K_MSEC(1000));
+    } else {
+        k_work_cancel_delayable(&poll_work);
+        /* 如果是真拔出，500ms 后发 false */
+        k_work_reschedule(&disconnect_work, K_MSEC(500)); 
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
