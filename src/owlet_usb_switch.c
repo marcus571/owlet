@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 增加 is_detecting 互斥锁，防止切换 D+/D- 时误触发断开事件导致 UI 死循环。
- *   2. 充电结束判断改为在 poll_handler 中读取 REG08 的 VBUS_STAT 状态。
+ *   引入 has_detected 标志，彻底阻断因切换总线引起的“断开-重连”死循环。
+ *   每个插拔周期内，仅在首次连接时执行一次 BQ25601D 检测。
  */
 
 #include <zephyr/kernel.h>
@@ -48,7 +48,9 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 static struct k_work_delayable detect_work;
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
-static bool is_detecting = false; /* 互斥标志，防止总线切换导致误判 */
+
+static bool is_detecting = false; /* 防止总线切换导致误判断开 */
+static bool has_detected = false; /* 阻断重新连接引起的二次切换死循环 */
 
 /* NTC 参数 */
 #define NTC_R25_OHM             10000.0f
@@ -107,16 +109,14 @@ static void poll_handler(struct k_work *work) {
 
     read_battery_temperature(&temp);
     
-    /* 读取状态寄存器 */
     if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
         vbus_stat = (reg08 & REG08_VBUS_STAT_MASK) >> 5;
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
     /* 
-     * 判断拔出逻辑：
-     * 如果 VBUS_STAT 为 0，说明没有输入电源了，线被拔了。
-     * 此时主动抛出 false 事件并停止轮询。
+     * 拔线判断逻辑：
+     * 如果 VBUS_STAT 为 0，说明没输入电源了，拔线了。
      */
     if (vbus_stat == 0) {
         k_work_cancel_delayable(&poll_work);
@@ -150,7 +150,7 @@ static void detect_handler(struct k_work *work) {
     uint8_t val;
     uint8_t vbus_stat = 0;
 
-    is_detecting = true; /* 标记正在检测，屏蔽 ZMK 的掉线事件 */
+    is_detecting = true;
     
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
     k_msleep(CONFIG_OWLET_CHARGER_SEL_SETTLE_MS);
@@ -177,7 +177,7 @@ static void detect_handler(struct k_work *work) {
 
     charge_start_time = k_uptime_get();
     
-    /* 启动定时器 */
+    /* 直接抛一次数据，唤醒 UI */
     poll_handler(NULL); 
 }
 
@@ -185,16 +185,18 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            /* 只有在没在检测时，才调度检测任务 */
-            if (!is_detecting) {
-                k_work_reschedule(&detect_work, K_MSEC(1500)); 
+            /* 只有首次插入，且未检测过，才执行检测任务 */
+            if (!is_detecting && !has_detected) {
+                has_detected = true;
+                k_work_reschedule(&detect_work, K_MSEC(1000)); /* 延迟1秒等枚举稳定 */
             }
         } else {
             /* 
-             * 如果是主动切换总线导致的断开（is_detecting == true），忽略它。
-             * 只有真正的外部断开，才取消轮询（其实 poll_handler 里的 vbus_stat == 0 已经兜底了）。
+             * 如果是主动切换导致的断开，忽略。
+             * 如果是真拔出，重置标志并抛 false。
              */
             if (!is_detecting) {
+                has_detected = false;
                 k_work_cancel_delayable(&poll_work);
                 k_work_cancel_delayable(&detect_work);
                 struct owlet_charger_state_changed ev = { .is_charging = false };
