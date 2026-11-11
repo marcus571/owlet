@@ -4,7 +4,7 @@
  *
  * 2026-11-11 修改记录：
  *   改为 3行4列 布局。
- *   新增 Fn 层 (Layer 1)，保留蓝牙清空与 RGB 切换功能。
+ *   新增 Fn 层 (Layer 1)，保留原有的蓝牙清空与 RGB 切换功能。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
