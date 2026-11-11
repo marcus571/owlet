@@ -3,7 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   修正事件结构体命名，统一为 owlet_charger_state_changed。
+ *   1. 新增 ZMK_EVENT_IMPL 以生成事件抛出函数实体。
+ *   2. configure_charger 参数由 uint8_t 改为 uint16_t，消除 300/500 截断。
  */
 
 #include <zephyr/kernel.h>
@@ -20,6 +21,9 @@
 #include "owlet_charger_event.h"
 
 LOG_MODULE_REGISTER(owlet_usb_switch, CONFIG_ZMK_LOG_LEVEL);
+
+/* 生成事件的实际定义与 raise/as 函数 */
+ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 /* BQ25601D I2C 地址与寄存器定义 */
 #define BQ25601D_ADDR           CONFIG_OWLET_CHARGER_I2C_ADDR
@@ -84,7 +88,8 @@ static int read_battery_temperature(int16_t *temp_c) {
     return 0;
 }
 
-static void configure_charger(uint8_t iindpm_ma, uint8_t ichg_ma,
+/* 修改：参数类型改为 uint16_t，避免 300/500 被截断 */
+static void configure_charger(uint16_t iindpm_ma, uint16_t ichg_ma,
                               uint16_t *actual_iindpm, uint16_t *actual_ichg) {
     uint8_t val;
 
@@ -148,13 +153,13 @@ static void usb_detect_handler(struct k_work *work) {
         LOG_INF("Battery temperature: %d C", battery_temp);
     }
 
-    /* 抛出事件，类型与头文件中的 struct owlet_charger_state_changed 匹配 */
-    raise_owlet_charger_state_changed((struct owlet_charger_state_changed){
+    struct owlet_charger_state_changed ev = {
         .vbus_stat = vbus_stat,
         .iindpm_ma = actual_iindpm,
         .ichg_ma = actual_ichg,
         .battery_temp_c = battery_temp,
-    });
+    };
+    raise_owlet_charger_state_changed(ev);
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     LOG_INF("FSUSB43 handed back to nRF52840 for enumeration");
