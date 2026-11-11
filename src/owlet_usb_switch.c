@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 修正事件抛出宏，改回官方兼容的 raise_xxx() 函数。
- *   2. 保留详细数据日志，便于排查 UI 显示全 0 的问题。
+ *   临时注释掉检测调度，确保 USB 插入时 FSUSB43 不切换总线，
+ *   以便电脑能够顺利枚举出 USB CDC ACM 串口并输出日志。
  */
 
 #include <zephyr/kernel.h>
@@ -129,7 +129,6 @@ static void poll_handler(struct k_work *work) {
         .charge_duration_s = duration,
     };
     
-    /* 使用 ZMK_EVENT_DECLARE 生成的标准 raise 函数 */
     raise_owlet_charger_state_changed(ev);
 
     /* 重新调度自己 */
@@ -164,8 +163,6 @@ static void detect_handler(struct k_work *work) {
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
 
     charge_start_time = k_uptime_get();
-    
-    /* 直接抛出一次初始状态，然后启动定时器 */
     poll_handler(NULL); 
 }
 
@@ -173,10 +170,14 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            k_work_reschedule(&detect_work, K_MSEC(20));
+            /* 
+             * 【调试用：临时注释】
+             * 先不调度 detect_work，不拉高 SEL，确保 USB 正常枚举。
+             */
+            // k_work_reschedule(&detect_work, K_MSEC(20));
+            LOG_INF("USB powered. FSUSB43 detect temporarily disabled for debugging.");
         } else {
             k_work_cancel_delayable(&poll_work);
-            /* 拔出后抛一次未充电状态 */
             struct owlet_charger_state_changed ev = { .is_charging = false };
             raise_owlet_charger_state_changed(ev);
             LOG_INF("USB unplugged, sent is_charging = false");
