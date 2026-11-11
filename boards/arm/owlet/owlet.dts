@@ -4,8 +4,8 @@
  * 路径：boards/arm/owlet/owlet.dts
  *
  * 2026-11-11 修改记录（USB 充电切换）：
- *   新增 FSUSB43 SEL 引脚（P0.11）与 BQ25601D 挂载节点（I2C 地址 0x6B）。
- *   修正：为 fsusb43_sel 节点添加 compatible = "gpio-keys" 以生成设备引用。
+ *   BQ25601D 挂载节点（I2C 地址 0x6B）。
+ *   移除 FSUSB43 SEL 节点，改为在 C 代码中直接控制 GPIO0 的 pin 11。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -48,12 +48,6 @@
 		blue_led: led_0 { gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>; label = "Blue LED"; };
 		caps_lock_led: led_1 { gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>; label = "Caps Lock LED"; };
 		num_lock_led: led_2 { gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>; label = "Num Lock LED"; };
-	};
-
-	/* FSUSB43 的 SEL 控制引脚（具备 compatible 属性，可用于 GPIO_DT_SPEC_GET） */
-	fsusb43_sel: fsusb43-sel {
-		compatible = "gpio-keys";
-		gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
 	};
 
 	left_encoder: encoder_left {
@@ -209,7 +203,7 @@ zephyr_udc0: &usbd {
 		#size-cells = <1>;
 
 		sd_partition: partition@0 { label = "softdevice"; reg = <0x00000000 0x00026000>; };
-		code_partition: partition@26000 { label = "code_partition"; reg = <0x00000000 0x00026000>; };
+		code_partition: partition@26000 { label = "code_partition"; reg = <0x00026000 0x000c6000>; };
 		storage_partition: partition@ec000 { label = "storage"; reg = <0x000ec000 0x00008000>; };
 		boot_partition: partition@f4000 { label = "adafruit_boot"; reg = <0x000f4000 0x0000c000>; };
 	};
