@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   引入 has_detected 标志，彻底阻断因切换总线引起的“断开-重连”死循环。
- *   每个插拔周期内，仅在首次连接时执行一次 BQ25601D 检测。
+ *   1. 移除 poll_handler 中的 vbus_stat == 0 拔线判断。防止因检测时切换 D+/D- 导致瞬断而误报关闭 UI。
+ *   2. 简化判断逻辑，恢复 USB_POWERED 延迟检测机制。
  */
 
 #include <zephyr/kernel.h>
@@ -48,9 +48,7 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 static struct k_work_delayable detect_work;
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
-
 static bool is_detecting = false; /* 防止总线切换导致误判断开 */
-static bool has_detected = false; /* 阻断重新连接引起的二次切换死循环 */
 
 /* NTC 参数 */
 #define NTC_R25_OHM             10000.0f
@@ -114,18 +112,6 @@ static void poll_handler(struct k_work *work) {
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
-    /* 
-     * 拔线判断逻辑：
-     * 如果 VBUS_STAT 为 0，说明没输入电源了，拔线了。
-     */
-    if (vbus_stat == 0) {
-        k_work_cancel_delayable(&poll_work);
-        struct owlet_charger_state_changed ev = { .is_charging = false };
-        raise_owlet_charger_state_changed(ev);
-        LOG_INF("Power removed, sent is_charging = false");
-        return;
-    }
-
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
     LOG_INF("Charger: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, dur=%us",
             soc, temp, vbus_stat, chrg_stat, duration);
@@ -185,22 +171,18 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            /* 只有首次插入，且未检测过，才执行检测任务 */
-            if (!is_detecting && !has_detected) {
-                has_detected = true;
-                k_work_reschedule(&detect_work, K_MSEC(1000)); /* 延迟1秒等枚举稳定 */
+            /* 延迟 1000ms 等枚举稳定后，执行检测 */
+            if (!is_detecting) {
+                k_work_reschedule(&detect_work, K_MSEC(1000));
             }
         } else {
-            /* 
-             * 如果是主动切换导致的断开，忽略。
-             * 如果是真拔出，重置标志并抛 false。
-             */
+            /* 如果不在主动检测切总线的过程中，才判定为真拔出 */
             if (!is_detecting) {
-                has_detected = false;
                 k_work_cancel_delayable(&poll_work);
                 k_work_cancel_delayable(&detect_work);
                 struct owlet_charger_state_changed ev = { .is_charging = false };
                 raise_owlet_charger_state_changed(ev);
+                LOG_INF("USB unplugged, sent is_charging = false");
             }
         }
     }
