@@ -2,8 +2,10 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-11 修改记录：
- *   引入 USB 事件死区（3秒）。彻底解决因切换总线导致的系统反复枚举（提示音）。
+ * 2026-11-12 修改记录：
+ *   1. 修复充电器类型误报：引入全局 detected_vbus_stat，在初次检测时锁定类型。
+ *   2. 轮询期间不再重新读取 REG08 的 VBUS_STAT，防止 D+/D- 切走后读到 0。
+ *   3. 轮询时同步上报正确的 iindpm_ma 和 ichg_ma。
  */
 
 #include <zephyr/kernel.h>
@@ -49,7 +51,11 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
-/* 忽略所有 USB 事件的时间窗口（毫秒） */
+/* 记录初次检测的结果，防止后续轮询被切走的 D+/D- 污染 */
+static uint8_t detected_vbus_stat = 0;
+static uint16_t detected_iindpm = 0;
+static uint16_t detected_ichg = 0;
+
 #define DETECT_DEAD_TIME_MS     3000 
 static int64_t last_detect_time = 0;
 
@@ -100,7 +106,7 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
 
 static void poll_handler(struct k_work *work) {
     uint8_t reg08 = 0;
-    uint8_t vbus_stat = 0, chrg_stat = 0;
+    uint8_t chrg_stat = 0;
     int16_t temp = 0;
     uint8_t soc = 0;
 
@@ -109,21 +115,21 @@ static void poll_handler(struct k_work *work) {
 
     read_battery_temperature(&temp);
     
+    /* 只读充电状态位，不再读 VBUS_STAT，直接用 detected_vbus_stat */
     if (bq_read_reg(BQ25601D_REG08, &reg08) == 0) {
-        vbus_stat = (reg08 & REG08_VBUS_STAT_MASK) >> 5;
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
     LOG_INF("Charger: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, dur=%us",
-            soc, temp, vbus_stat, chrg_stat, duration);
+            soc, temp, detected_vbus_stat, chrg_stat, duration);
 
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = vbus_stat,
+        .vbus_stat = detected_vbus_stat,
         .chrg_stat = chrg_stat,
-        .iindpm_ma = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA,
-        .ichg_ma = CONFIG_OWLET_CHARGER_SDP_ICHG_MA,
+        .iindpm_ma = detected_iindpm,
+        .ichg_ma = detected_ichg,
         .battery_soc = soc,
         .battery_temp_c = temp,
         .charge_duration_s = duration,
@@ -143,7 +149,6 @@ static void detect_handler(struct k_work *work) {
     uint8_t val;
     uint8_t vbus_stat = 0;
 
-    /* 触发检测，立刻进入死区 */
     last_detect_time = k_uptime_get();
     
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
@@ -158,12 +163,21 @@ static void detect_handler(struct k_work *work) {
         vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
     }
 
+    /* 记录初次检测的结果，并配置电流 */
+    detected_vbus_stat = vbus_stat;
     if (vbus_stat == 1) {
-        configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
+        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
+        configure_charger(detected_iindpm, detected_ichg);
     } else if (vbus_stat == 3) {
-        configure_charger(CONFIG_OWLET_CHARGER_DCP_IINDPM_MA, CONFIG_OWLET_CHARGER_DCP_ICHG_MA);
+        detected_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
+        detected_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
+        configure_charger(detected_iindpm, detected_ichg);
     } else {
-        configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
+        /* 未知电源保底 */
+        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
+        configure_charger(detected_iindpm, detected_ichg);
     }
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
@@ -177,11 +191,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
 
     int64_t now = k_uptime_get();
-
-    /* 
-     * 核心修复：如果处于死区内（刚发生检测没多久），
-     * 屏蔽所有 USB 插入/拔出事件。
-     */
     if (now - last_detect_time < DETECT_DEAD_TIME_MS) {
         return ZMK_EV_EVENT_BUBBLE;
     }
@@ -191,7 +200,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
         k_work_reschedule(&detect_work, K_MSEC(1000));
     } else {
         k_work_cancel_delayable(&poll_work);
-        /* 如果是真拔出，500ms 后发 false */
         k_work_reschedule(&disconnect_work, K_MSEC(500)); 
     }
     return ZMK_EV_EVENT_BUBBLE;
