@@ -3,11 +3,8 @@
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-11 修改记录（引脚调整）：
- *   1. EC11编码器：音量减小P1.08，音量增大P0.07。
- *   2. MAX17048 I2C：SDA P0.06，SCL P0.26。
- *   3. 屏幕 nice!view：SCS P0.12，SI P1.09，SCLK P0.08。
- *   4. WS2812B 灯带：灯珠数量改为11，控制引脚改为 P0.29。
+ * 2026-11-11 修改记录（USB 充电切换）：
+ *   新增 FSUSB43 SEL 引脚（P0.11）与 BQ25601D 挂载节点（I2C 地址 0x6B）。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -43,6 +40,7 @@
 		led0 = &blue_led;
 		caps-led = &caps_lock_led;
 		num-led = &num_lock_led;
+		usb-sel = &fsusb43_sel;
 	};
 
 	leds {
@@ -52,10 +50,16 @@
 		num_lock_led: led_2 { gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>; label = "Num Lock LED"; };
 	};
 
+	/* FSUSB43 的 SEL 控制引脚 */
+	fsusb43_sel: fsusb43-sel {
+		compatible = "gpio-leds";
+		gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+		label = "USB Switch SEL";
+	};
+
 	left_encoder: encoder_left {
 		compatible = "alps,ec11";
 		label = "LEFT_ENCODER";
-		/* 修改：A相(音量增大) P0.07，B相(音量减小) P1.08 */
 		a-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		b-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		steps = <80>;
@@ -106,15 +110,12 @@
 &left_encoder { status = "okay"; };
 
 &pinctrl {
-	/* 修改：屏幕 SPI1 引脚 SCLK P0.08, MOSI P1.09 */
 	spi1_default: spi1_default { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; }; };
 	spi1_sleep: spi1_sleep { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; low-power-enable; }; };
 	
-	/* 修改：灯带 SPI3 引脚 MOSI P0.29 */
 	spi3_default: spi3_default { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; }; };
 	spi3_sleep: spi3_sleep { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; low-power-enable; }; };
 	
-	/* 修改：MAX17048 I2C0 引脚 SCL P0.26, SDA P0.06 */
 	i2c0_default: i2c0_default { 
 		group1 { 
 			psels = <NRF_PSEL(TWIM_SCL, 0, 26)>, <NRF_PSEL(TWIM_SDA, 0, 6)>; 
@@ -136,7 +137,6 @@ nice_view_spi: &spi1 {
 	pinctrl-0 = <&spi1_default>;
 	pinctrl-1 = <&spi1_sleep>;
 	pinctrl-names = "default", "sleep";
-	/* 修改：屏幕 SCS P0.12 */
 	cs-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -163,7 +163,6 @@ nice_view_spi: &spi1 {
 		status = "okay";
 		reg = <0>;
 		spi-max-frequency = <4000000>;
-		/* 修改：灯珠数量改为 11 */
 		chain-length = <11>;
 		spi-one-frame = <0x70>;
 		spi-zero-frame = <0x40>;
@@ -182,6 +181,13 @@ nice_view_spi: &spi1 {
 	max17048: max17048@36 {
 		compatible = "zmk,maxim-max17048";
 		reg = <0x36>;
+	};
+
+	/* 新增 BQ25601D 挂载 */
+	bq25601d: bq25601d@6b {
+		compatible = "ti,bq25601d";
+		reg = <0x6b>;
+		status = "okay";
 	};
 };
 
