@@ -3,9 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   修复 UI 不弹出问题：
- *   移除所有复杂的标志位。通过给 DISCONNECTED 事件增加 3 秒防抖，
- *   完美区分“切换总线造成的假断开”和“真实拔线”，绝不误杀 UI 页面。
+ *   1. 引入 is_physically_plugged 状态位，彻底解决因切换 D+/D- 触发的系统反复枚举（提示音）。
+ *   2. 优化断开防抖逻辑。
  */
 
 #include <zephyr/kernel.h>
@@ -48,8 +47,11 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 
 static struct k_work_delayable detect_work;
 static struct k_work_delayable poll_work;
-static struct k_work_delayable disconnect_work; /* 处理拔线防抖 */
+static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
+
+static bool is_detecting = false;
+static bool is_physically_plugged = false;
 
 /* NTC 参数 */
 #define NTC_R25_OHM             10000.0f
@@ -96,7 +98,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     }
 }
 
-/* 定时轮询任务 */
 static void poll_handler(struct k_work *work) {
     uint8_t reg08 = 0;
     uint8_t vbus_stat = 0, chrg_stat = 0;
@@ -132,19 +133,18 @@ static void poll_handler(struct k_work *work) {
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 }
 
-/* 拔线延时处理（防抖） */
 static void disconnect_handler(struct k_work *work) {
-    /* 3秒后如果确认没插回来，才真的发 false */
     struct owlet_charger_state_changed ev = { .is_charging = false };
     raise_owlet_charger_state_changed(ev);
     LOG_INF("USB unplugged confirmed, sent is_charging = false");
 }
 
-/* USB 插入检测 */
 static void detect_handler(struct k_work *work) {
     uint8_t val;
     uint8_t vbus_stat = 0;
 
+    is_detecting = true;
+    
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 1);
     k_msleep(CONFIG_OWLET_CHARGER_SEL_SETTLE_MS);
 
@@ -166,10 +166,12 @@ static void detect_handler(struct k_work *work) {
     }
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
+    
+    /* 给予电脑重新枚举的时间 */
+    k_msleep(100);
+    is_detecting = false;
 
     charge_start_time = k_uptime_get();
-    
-    /* 立刻抛一次数据，唤醒 UI */
     poll_handler(NULL); 
 }
 
@@ -177,19 +179,20 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (ev) {
         if (ev->conn_state == ZMK_USB_CONN_POWERED) {
-            /* 插上线：立刻取消可能正在倒计时的拔线任务 */
             k_work_cancel_delayable(&disconnect_work);
             
-            /* 延迟 1000ms 等枚举稳定后，执行检测并拉起 UI */
-            k_work_reschedule(&detect_work, K_MSEC(1000));
+            /* 只有真实插入且不在检测期间，才触发检测，防止重新枚举导致的死循环 */
+            if (!is_physically_plugged && !is_detecting) {
+                is_physically_plugged = true;
+                k_work_reschedule(&detect_work, K_MSEC(1000));
+            }
         } else {
-            /* 
-             * 物理断开：停止数据轮询。
-             * 延迟 3 秒再抛出 false，如果这 3 秒内又收到了 POWERED，就会取消本次任务。
-             * 完美规避切换总线导致的误报！
-             */
-            k_work_cancel_delayable(&poll_work);
-            k_work_reschedule(&disconnect_work, K_MSEC(3000));
+            /* 只有在非检测期间发生断开，才是真实拔出 */
+            if (!is_detecting) {
+                is_physically_plugged = false;
+                k_work_cancel_delayable(&poll_work);
+                k_work_reschedule(&disconnect_work, K_MSEC(3000));
+            }
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
