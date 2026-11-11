@@ -3,9 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 实现周期性状态广播（SOC、温度、充电时长、充电状态）。
- *   2. 移除不可用的实际电流读取，改用 CHRG_STAT 充电状态。
- *   3. 结合 ZMK 原生 API 获取电池 SOC。
+ *   1. 改用 ZMK_EVENT_RAISE(new_xxx) 标准事件抛出格式。
+ *   2. 增加详细数据日志，便于排查 UI 显示全 0 的问题。
  */
 
 #include <zephyr/kernel.h>
@@ -30,7 +29,6 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601D_ADDR           CONFIG_OWLET_CHARGER_I2C_ADDR
 #define BQ25601D_REG00          0x00 /* IINDPM */
 #define BQ25601D_REG02          0x02 /* ICHG */
-#define BQ25601D_REG04          0x04 /* VREG/TOPOFF */
 #define BQ25601D_REG07          0x07 /* IINDET_EN */
 #define BQ25601D_REG08          0x08 /* CHRG_STAT/VBUS_STAT */
 #define BQ25601D_REG0A          0x0A /* TS_ADC 高字节 */
@@ -98,7 +96,7 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
 
 /* 定时轮询任务 */
 static void poll_handler(struct k_work *work) {
-    uint8_t reg08;
+    uint8_t reg08 = 0;
     uint8_t vbus_stat = 0, chrg_stat = 0;
     int16_t temp = 0;
     uint8_t soc = 0;
@@ -114,6 +112,11 @@ static void poll_handler(struct k_work *work) {
         chrg_stat = (reg08 & REG08_CHRG_STAT_MASK) >> 3;
     }
 
+    /* 打印日志，方便调试 */
+    uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
+    LOG_INF("Charger state: SOC=%d%%, Temp=%dC, vbus=%d, chrg=%d, duration=%us",
+            soc, temp, vbus_stat, chrg_stat, duration);
+
     /* 抛出状态 */
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
@@ -123,9 +126,11 @@ static void poll_handler(struct k_work *work) {
         .ichg_ma = CONFIG_OWLET_CHARGER_SDP_ICHG_MA,
         .battery_soc = soc,
         .battery_temp_c = temp,
-        .charge_duration_s = (uint32_t)((k_uptime_get() - charge_start_time) / 1000),
+        .charge_duration_s = duration,
     };
-    raise_owlet_charger_state_changed(ev);
+    
+    /* 改用标准的 ZMK_EVENT_RAISE 宏 */
+    ZMK_EVENT_RAISE(new_owlet_charger_state_changed(ev));
 
     /* 重新调度自己 */
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
@@ -159,7 +164,9 @@ static void detect_handler(struct k_work *work) {
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
 
     charge_start_time = k_uptime_get();
-    poll_handler(NULL); /* 立即抛一次初始状态 */
+    
+    /* 直接抛出一次初始状态，然后启动定时器 */
+    poll_handler(NULL); 
 }
 
 static int usb_switch_cb(const zmk_event_t *eh) {
@@ -170,9 +177,9 @@ static int usb_switch_cb(const zmk_event_t *eh) {
         } else {
             k_work_cancel_delayable(&poll_work);
             /* 拔出后抛一次未充电状态 */
-            raise_owlet_charger_state_changed((struct owlet_charger_state_changed){
-                .is_charging = false,
-            });
+            struct owlet_charger_state_changed ev = { .is_charging = false };
+            ZMK_EVENT_RAISE(new_owlet_charger_state_changed(ev));
+            LOG_INF("USB unplugged, sent is_charging = false");
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
