@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+#
+# 2026-10-27 修改记录：
+#   恢复为 depends on SOC_NRF52840_QIAA，与 ZMK 官方 nice_nano_v2 /
+#   mikoto 的写法保持一致。SOC_NRF52840_QIAA 是 choice symbol，
+#   不能用 select 激活（日志已明确提示
+#   "select/imply has no effect on choice symbols"）。
+#   该 depends on 会在 owlet_defconfig 中同时设置
+#   CONFIG_SOC_SERIES_NRF52X=y 和 CONFIG_SOC_NRF52840_QIAA=y 后
+#   得到满足，从而激活 BOARD_OWLET。
+
+config BOARD_OWLET
+	bool "Owlet Keyboard"
+	depends on SOC_NRF52840_QIAA

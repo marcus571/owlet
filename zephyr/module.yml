@@ -1,0 +1,14 @@
+# ============================================================
+# Zephyr 模块描述
+# 路径：zephyr/module.yml
+#
+# 2026-10-29 18:00 修改记录：
+#   新增 build.cmake 和 build.kconfig，以引入仓库根目录的自定义驱动源码与 Kconfig。
+# ============================================================
+name: owlet-zmk-module
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    board_root: .
+    dts_root: .

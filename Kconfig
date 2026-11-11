@@ -1,0 +1,29 @@
+# ============================================================
+# 仓库根目录的 Kconfig
+# 路径：Kconfig
+#
+# 2026-11-05 17:00 修改记录：
+#   移除 OWLET_BLE_LED_CONNECTED_TIMEOUT_MIN 选项。
+# ============================================================
+
+config OWLET_BLE_LED
+	bool "Owlet 指示灯驱动（蓝牙 + 可选锁定灯）"
+	default y
+
+if OWLET_BLE_LED
+config OWLET_BLE_LED_POLL_MS
+	int "已连接时复查连接状态的周期（毫秒）"
+	default 500
+
+config OWLET_BLE_LED_BLINK_ON_MS
+	int "未连接时每次点亮的时长（毫秒）"
+	default 100
+
+config OWLET_BLE_LED_BLINK_OFF_MS
+	int "未连接时每次熄灭的时长（毫秒）"
+	default 900
+
+config OWLET_BLE_LED_USB_COUNTS_AS_CONNECTED
+	bool "USB 已连接（HID 就绪）也视为已连接并常亮"
+	default n
+endif

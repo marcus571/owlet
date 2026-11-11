@@ -1,0 +1,13 @@
+file_format: "1"
+id: owlet
+name: Owlet Keyboard
+type: board
+arch: arm
+outputs:
+  - uf2
+url: https://github.com/yourusername/owlet-zmk-config
+description: Owlet Custom Keyboard
+requires: []
+features:
+  - keys
+siblings: []

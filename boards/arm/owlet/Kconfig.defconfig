@@ -1,0 +1,13 @@
+if BOARD_OWLET
+
+config BOARD
+	default "owlet"
+
+# 2026-10-27 修正：补充 bool 类型声明，消除 "defined without a type" 错误。
+# BOARD_HAS_NRF5_BOOTLOADER 是 Zephyr 板级符号，用于告知构建系统
+# 固件由 nRF5 引导程序加载，链接时需要按 code_partition 偏移。
+config BOARD_HAS_NRF5_BOOTLOADER
+	bool "Board has nRF5 bootloader"
+	default y
+
+endif

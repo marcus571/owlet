@@ -1,0 +1,18 @@
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: marcus571
+      url-base: https://github.com/marcus571
+
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: v0.3.0
+      import: app/west.yml
+    - name: owlet-view-tri  # 换成你的新仓库名
+      remote: marcus571
+      revision: main    # 你上传的文件应该都在 main 分支
+
+  self:
+    path: config
