@@ -1,0 +1,6 @@
+# 主仓库路径: dts/bindings/behaviors/zmk,behavior-screen-swap.yaml
+description: Screen swap behavior for switching UI screens
+
+compatible: "zmk,behavior-screen-swap"
+
+properties: {}
