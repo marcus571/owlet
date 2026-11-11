@@ -3,8 +3,8 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-11 修改记录：
- *   1. 改用 ZMK_EVENT_RAISE(new_xxx) 标准事件抛出格式。
- *   2. 增加详细数据日志，便于排查 UI 显示全 0 的问题。
+ *   1. 修正事件抛出宏，改回官方兼容的 raise_xxx() 函数。
+ *   2. 保留详细数据日志，便于排查 UI 显示全 0 的问题。
  */
 
 #include <zephyr/kernel.h>
@@ -129,8 +129,8 @@ static void poll_handler(struct k_work *work) {
         .charge_duration_s = duration,
     };
     
-    /* 改用标准的 ZMK_EVENT_RAISE 宏 */
-    ZMK_EVENT_RAISE(new_owlet_charger_state_changed(ev));
+    /* 使用 ZMK_EVENT_DECLARE 生成的标准 raise 函数 */
+    raise_owlet_charger_state_changed(ev);
 
     /* 重新调度自己 */
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
@@ -178,7 +178,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             k_work_cancel_delayable(&poll_work);
             /* 拔出后抛一次未充电状态 */
             struct owlet_charger_state_changed ev = { .is_charging = false };
-            ZMK_EVENT_RAISE(new_owlet_charger_state_changed(ev));
+            raise_owlet_charger_state_changed(ev);
             LOG_INF("USB unplugged, sent is_charging = false");
         }
     }
