@@ -2,8 +2,8 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-11 修改记录：
- *   Fn 层第三行第一列加入 &screen_swap（切换系统屏/充电屏）。
+ * 2026-11-12 修改记录：
+ *   整理 Fn 层第三行快捷键：屏幕切换、灯光开关、清空蓝牙、进入 Bootloader。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -28,9 +28,9 @@
 		// Fn 层 (Layer 1) - 按住第一行的 Fn 键触发
 		fn_layer {
 			bindings = <
-				&trans      &trans          &trans            &trans
-				&trans      &trans          &trans            &trans
-				&screen_swap &bt BT_CLR_ALL &owlet_rgb_toggle &trans
+				&trans        &trans          &trans            &trans
+				&trans        &trans          &trans            &trans
+				&screen_swap  &owlet_rgb_toggle &bt BT_CLR_ALL  &bootloader
 			>;
 		};
 	};
