@@ -1,10 +1,9 @@
 /*
- * owlet 键位映射文件 (settings_reset 临时版)
+ * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-12 临时修改：
- *   settings_reset 编译时缺少 UI 仓库的 &screen_swap 节点，
- *   临时将其替换为 &trans 以便编译通过。
+ * 2026-11-12 修改记录：
+ *   恢复正常快捷键布局，包含切屏、RGB控制、清蓝牙、Bootloader。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -36,7 +35,7 @@
 			bindings = <
 				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
 				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
-				&trans          &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
+				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
 			sensor-bindings = <&rgb_encoder>;
 		};
