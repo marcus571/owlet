@@ -3,4 +3,4 @@ include:
     shield: settings_reset
     artifact-name: owlet-settings-reset
     snippet: zmk-usb-logging
-    cmake_args: "-DCONFIG_OWLET_BLE_LED=n -DCONFIG_OWLET_USB_CHARGER_SWITCH=n"
+    cmake-args: -DCONFIG_OWLET_BLE_LED=n -DCONFIG_OWLET_USB_CHARGER_SWITCH=n
