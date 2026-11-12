@@ -1,10 +1,10 @@
 /*
- * owlet 键位映射文件
+ * owlet 键位映射文件 (settings_reset 临时版)
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-12 A/B 测试版：
- *   临时将第三行第二列替换为 ZMK 原生 &rgb_ug RGB_TOG，
- *   用于排查自定义行为 &owlet_rgb_toggle 是否破坏了 Flash 保存机制。
+ * 2026-11-12 临时修改：
+ *   settings_reset 编译时缺少 UI 仓库的 &screen_swap 节点，
+ *   临时将其替换为 &trans 以便编译通过。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -36,7 +36,7 @@
 			bindings = <
 				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
 				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
-				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
+				&trans          &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
 			sensor-bindings = <&rgb_encoder>;
 		};
