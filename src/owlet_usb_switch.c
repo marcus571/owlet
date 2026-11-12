@@ -2,9 +2,10 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-12 终极纠错版：
- *   1. 在 poll_handler 中动态判断接口类型。如果 ZMK 成功枚举（插在电脑上），强制将 UI 和底层电流修改为 SDP 的 300mA。
- *   2. 如果插的是纯充电器，则保持 DCP 的 500mA。
+ * 2026-11-12 修改记录：
+ *   1. 移除对 iindpm_ma 的发送。
+ *   2. 新增 raw_vbus 透传，直接将硬件检测值发给 UI。
+ *   3. 根据 raw_vbus 硬件值直接配置三种不同的安全电流（SDP=300, CDP=500, DCP=500）。
  */
 
 #include <zephyr/kernel.h>
@@ -50,11 +51,10 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
-/* 记录 BQ25601D 实际检测到的 VBUS 类型（仅用于内部配电流） */
+/* 记录 BQ25601D 实际检测到的 VBUS 类型 */
 static uint8_t bq_vbus_stat = 0;
 static uint16_t detected_iindpm = 0;
 static uint16_t detected_ichg = 0;
-static bool current_lowered_to_sdp = false;
 
 #define DETECT_DEAD_TIME_MS     3000 
 static int64_t last_detect_time = 0;
@@ -121,39 +121,15 @@ static void poll_handler(struct k_work *work) {
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
 
-    /* 
-     * 核心修复：动态判断接口类型和电流。
-     * 只要 ZMK 成功枚举了，就一定是电脑，强制锁定为 SDP (1) 和 300mA。
-     */
-    bool is_pc = zmk_usb_is_hid_ready();
-    uint8_t ui_vbus_stat = is_pc ? 1 : 3;
-    uint16_t ui_iindpm, ui_ichg;
-
-    if (is_pc) {
-        ui_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
-        ui_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-        
-        /* 如果之前被 BQ 误判成了大电流，现在动态改回安全值 */
-        if (!current_lowered_to_sdp) {
-            configure_charger(ui_iindpm, ui_ichg);
-            current_lowered_to_sdp = true;
-            LOG_INF("PC HID ready, forcing current to %dmA", ui_iindpm);
-        }
-    } else {
-        /* 如果是纯充电器，使用检测到的硬件大电流 */
-        ui_iindpm = detected_iindpm;
-        ui_ichg = detected_ichg;
-    }
-
-    LOG_INF("UI Type: %s, IINDPM: %dmA, SOC=%d%%, Temp=%dC",
-            ui_vbus_stat == 1 ? "USB" : "CHG", ui_iindpm, soc, temp);
+    LOG_INF("Charger: SOC=%d%%, Temp=%dC, raw_vbus=%d, chrg=%d, dur=%us",
+            soc, temp, bq_vbus_stat, chrg_stat, duration);
 
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = ui_vbus_stat,
+        .vbus_stat = bq_vbus_stat,       /* 直接透传 BQ 检测到的类型 */
+        .raw_vbus = bq_vbus_stat,        /* 原始数据，与 vbus_stat 保持一致，供 UI 排查 */
         .chrg_stat = chrg_stat,
-        .iindpm_ma = ui_iindpm,
-        .ichg_ma = ui_ichg,
+        .ichg_ma = detected_ichg,        /* 只保留电池充电电流 */
         .battery_soc = soc,
         .battery_temp_c = temp,
         .charge_duration_s = duration,
@@ -182,20 +158,32 @@ static void detect_handler(struct k_work *work) {
     }
     k_msleep(CONFIG_OWLET_CHARGER_DETECT_WAIT_MS);
 
+    /* 读取 BQ25601D 原始检测值 */
     if (bq_read_reg(BQ25601D_REG08, &val) == 0) {
         bq_vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
     }
+    
+    LOG_INF("Raw BQ25601D Detection: %d", bq_vbus_stat);
 
-    /* 这里依然读 BQ 的结果，决定初始电流 */
-    if (bq_vbus_stat == 3 || bq_vbus_stat == 2) { 
+    /* 根据硬件检测的原始类型，配置三档电流 */
+    if (bq_vbus_stat == 1) { 
+        /* 1 = SDP (标准电脑口) */
+        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
+    } else if (bq_vbus_stat == 2) {
+        /* 2 = CDP (充电电脑口) */
+        detected_iindpm = CONFIG_OWLET_CHARGER_CDP_IINDPM_MA;
+        detected_ichg = CONFIG_OWLET_CHARGER_CDP_ICHG_MA;
+    } else if (bq_vbus_stat == 3) { 
+        /* 3 = DCP (专用充电器) */
         detected_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
     } else {
+        /* 未知或非标，按最安全的 SDP 处理 */
         detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
         detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
     }
-    
-    current_lowered_to_sdp = false;
+
     configure_charger(detected_iindpm, detected_ichg);
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
@@ -209,6 +197,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
 
     int64_t now = k_uptime_get();
+    /* 3 秒硬件死区，防止切换 D+/D- 引起枚举乱跳 */
     if (now - last_detect_time < DETECT_DEAD_TIME_MS) {
         return ZMK_EV_EVENT_BUBBLE;
     }
