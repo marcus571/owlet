@@ -3,15 +3,14 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-12 修改记录：
- *   1. 移除无效的 NTC 温度计算（BQ25601 无内部温度 ADC）。
- *   2. 引入 Zephyr sensor API，通过 MAX17048 读取真实电池电压。
+ *   废弃 Zephyr Sensor API（因 ZMK 驱动不支持读取电压）。
+ *   改为直接通过 I2C 读取 MAX17048 的 VCELL (0x02) 寄存器获取真实电压。
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
 
 #include <zmk/usb.h>
@@ -32,7 +31,11 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601D_REG07          0x07 /* IINDET_EN */
 #define BQ25601D_REG08          0x08 /* CHRG_STAT/VBUS_STAT */
 
-/* 掩码 */
+/* MAX17048 寄存器与地址 */
+#define MAX17048_ADDR           0x36
+#define MAX17048_REG_VCELL      0x02
+
+/* BQ25601D 掩码 */
 #define REG00_IINDPM_MASK       0x1F
 #define REG02_ICHG_MASK         0x3F
 #define REG07_IINDET_EN_MASK    BIT(7)
@@ -42,7 +45,6 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define SEL_GPIO_PIN            CONFIG_OWLET_CHARGER_SEL_GPIO_PIN
 static const struct device *gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
-static const struct device *battery_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
 
 static struct k_work_delayable detect_work;
 static struct k_work_delayable poll_work;
@@ -75,23 +77,18 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     }
 }
 
-/* 通过 MAX17048 读取电池电压 */
+/* 直接读取 MAX17048 的 VCELL 寄存器获取电压 */
 static uint16_t read_battery_voltage_mv(void) {
-    if (!device_is_ready(battery_dev)) {
+    uint8_t buf[2];
+    if (i2c_burst_read(i2c_dev, MAX17048_ADDR, MAX17048_REG_VCELL, buf, 2) != 0) {
         return 0;
     }
     
-    struct sensor_value v;
-    if (sensor_sample_fetch(battery_dev) != 0) {
-        return 0;
-    }
-    if (sensor_channel_get(battery_dev, SENSOR_CHAN_GAUGE_VOLTAGE, &v) != 0) {
-        return 0;
-    }
+    uint16_t raw = ((uint16_t)buf[0] << 8) | buf[1];
     
-    /* sensor_value 的 val1 为伏特(V)，val2 为微伏(uV) */
-    uint16_t voltage_mv = (uint16_t)(v.val1 * 1000 + v.val2 / 1000);
-    return voltage_mv;
+    /* VCELL LSB = 78.125uV = 0.078125mV */
+    /* raw * 78.125 / 1000 = (raw * 125) / 1600 */
+    return (uint16_t)((raw * 125) / 1600);
 }
 
 static void poll_handler(struct k_work *work) {
@@ -206,10 +203,6 @@ static int owlet_usb_switch_init(void) {
     if (!device_is_ready(gpio0_dev)) return -ENODEV;
     gpio_pin_configure(gpio0_dev, SEL_GPIO_PIN, GPIO_OUTPUT_INACTIVE);
     if (!device_is_ready(i2c_dev)) return -ENODEV;
-
-    if (!device_is_ready(battery_dev)) {
-        LOG_ERR("Battery device (MAX17048) not ready");
-    }
 
     k_work_init_delayable(&detect_work, detect_handler);
     k_work_init_delayable(&poll_work, poll_handler);
