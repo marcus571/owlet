@@ -2,10 +2,9 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-12 最终混合版：
- *   1. raw_vbus 保留底层原始数据（供 UI 观察）。
- *   2. vbus_stat 和 最终充电电流 依靠 zmk_usb_is_hid_ready() 判断。
- *   3. 如果连上电脑，不管 raw 是几，强制改写芯片为 300mA 并显示 USB。
+ * 2026-11-12 终极统一版：
+ *   修复“UI显示与底层硬件执行不一致”的 Bug。
+ *   引入硬件状态缓存，在轮询中根据目标值动态改写 BQ25601D 的 I2C 寄存器。
  */
 
 #include <zephyr/kernel.h>
@@ -51,8 +50,12 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
+/* 记录 BQ25601D 实际检测到的 VBUS 类型 */
 static uint8_t bq_vbus_stat = 0;
-static bool current_lowered_to_sdp = false;
+
+/* 硬件状态缓存，只有目标值变化时才写 I2C，防止频繁写寄存器 */
+static uint16_t current_hw_iindpm = 0;
+static uint16_t current_hw_ichg = 0;
 
 #define DETECT_DEAD_TIME_MS     3000 
 static int64_t last_detect_time = 0;
@@ -119,35 +122,35 @@ static void poll_handler(struct k_work *work) {
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
 
-    /* 终极判断：以 ZMK 是否能通信为准 */
-    bool is_pc = zmk_usb_is_hid_ready();
-    
-    uint8_t ui_vbus_stat;
-    uint16_t ui_ichg;
-
-    if (is_pc) {
-        ui_vbus_stat = 1; /* 强制告诉 UI 这是 USB */
-        ui_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA; /* 强制 300mA */
-        
-        if (!current_lowered_to_sdp) {
-            configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
-            current_lowered_to_sdp = true;
-            LOG_INF("PC connected, override to 300mA");
-        }
+    /* 计算目标电流 */
+    uint16_t target_iindpm, target_ichg;
+    if (bq_vbus_stat == 1) { 
+        /* SDP (标准电脑口) */
+        target_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+        target_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
     } else {
-        ui_vbus_stat = 3; /* 强制告诉 UI 这是充电器 */
-        ui_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA; /* 500mA */
+        /* CDP (2)、DCP (3) 及其他未知，统一按大电流 (500mA) 处理 */
+        target_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
+        target_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
     }
 
-    LOG_INF("UI: %s, Raw_VBUS: %d, SOC=%d%%, Temp=%dC",
-            ui_vbus_stat == 1 ? "USB" : "CHG", bq_vbus_stat, soc, temp);
+    /* 只有当目标电流发生变化时，才真正去写 BQ25601D 的寄存器 */
+    if (target_iindpm != current_hw_iindpm || target_ichg != current_hw_ichg) {
+        configure_charger(target_iindpm, target_ichg);
+        current_hw_iindpm = target_iindpm;
+        current_hw_ichg = target_ichg;
+        LOG_INF("Hardware updated to %dmA", target_ichg);
+    }
+
+    LOG_INF("UI: raw_vbus=%d, target_ichg=%dmA, SOC=%d%%, Temp=%dC",
+            bq_vbus_stat, target_ichg, soc, temp);
 
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = ui_vbus_stat,
+        .vbus_stat = bq_vbus_stat,       /* 直接透传 */
         .raw_vbus = bq_vbus_stat,        /* 原样透传 */
         .chrg_stat = chrg_stat,
-        .ichg_ma = ui_ichg,
+        .ichg_ma = target_ichg,          /* UI 显示的数值与硬件完全一致 */
         .battery_soc = soc,
         .battery_temp_c = temp,
         .charge_duration_s = duration,
@@ -180,9 +183,10 @@ static void detect_handler(struct k_work *work) {
         bq_vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
     }
 
-    /* 初始电流直接按最保守配，如果真的是电脑，poll_handler 会再纠正 */
+    /* 初始配置为最安全的 300mA，如果是充电器，poll_handler 会在一秒内自动升到 500mA */
     configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
-    current_lowered_to_sdp = true;
+    current_hw_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
+    current_hw_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     
