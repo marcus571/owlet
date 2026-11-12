@@ -3,7 +3,7 @@
  * 路径：boards/arm/owlet/owlet.keymap
  *
  * 2026-11-12 修改记录：
- *   整理 Fn 层第三行快捷键：屏幕切换、灯光开关、清空蓝牙、进入 Bootloader。
+ *   Fn 层第二行增加 RGB 控制：亮度减、亮度加、色相减、色相增。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -28,9 +28,9 @@
 		// Fn 层 (Layer 1) - 按住第一行的 Fn 键触发
 		fn_layer {
 			bindings = <
-				&trans        &trans          &trans            &trans
-				&trans        &trans          &trans            &trans
-				&screen_swap  &owlet_rgb_toggle &bt BT_CLR_ALL  &bootloader
+				&trans        &trans            &trans            &trans
+				&rgb_ug RGB_BRD &rgb_ug RGB_BRI &rgb_ug RGB_HUD   &rgb_ug RGB_HUI
+				&screen_swap  &owlet_rgb_toggle &bt BT_CLR_ALL    &bootloader
 			>;
 		};
 	};
