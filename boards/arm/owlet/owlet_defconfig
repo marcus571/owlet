@@ -81,5 +81,13 @@ CONFIG_USE_DT_CODE_PARTITION=y
 # 其他必需配置
 CONFIG_BT_CTLR=y
 CONFIG_REBOOT=y
-CONFIG_NRF_STORE_REBOOT_TYPE_GPREGRET=n
+
+# ============================================================
+# 【关键修复】允许重启时将魔法值写入 GPREGRET 寄存器
+# 配合 Nice!nano 的 Adafruit Bootloader 进入 UF2 刷机模式
+# ============================================================
+CONFIG_NRF_STORE_REBOOT_TYPE_GPREGRET=y
+CONFIG_RETAINED_MEM=y
+CONFIG_RETENTION=y
+
 CONFIG_BUILD_OUTPUT_UF2=y
