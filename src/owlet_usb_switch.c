@@ -2,10 +2,10 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-12 修改记录：
- *   1. 移除对 iindpm_ma 的发送。
- *   2. 新增 raw_vbus 透传，直接将硬件检测值发给 UI。
- *   3. 根据 raw_vbus 硬件值直接配置三种不同的安全电流（SDP=300, CDP=500, DCP=500）。
+ * 2026-11-12 最终混合版：
+ *   1. raw_vbus 保留底层原始数据（供 UI 观察）。
+ *   2. vbus_stat 和 最终充电电流 依靠 zmk_usb_is_hid_ready() 判断。
+ *   3. 如果连上电脑，不管 raw 是几，强制改写芯片为 300mA 并显示 USB。
  */
 
 #include <zephyr/kernel.h>
@@ -51,10 +51,8 @@ static struct k_work_delayable poll_work;
 static struct k_work_delayable disconnect_work;
 static int64_t charge_start_time;
 
-/* 记录 BQ25601D 实际检测到的 VBUS 类型 */
 static uint8_t bq_vbus_stat = 0;
-static uint16_t detected_iindpm = 0;
-static uint16_t detected_ichg = 0;
+static bool current_lowered_to_sdp = false;
 
 #define DETECT_DEAD_TIME_MS     3000 
 static int64_t last_detect_time = 0;
@@ -121,15 +119,35 @@ static void poll_handler(struct k_work *work) {
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
 
-    LOG_INF("Charger: SOC=%d%%, Temp=%dC, raw_vbus=%d, chrg=%d, dur=%us",
-            soc, temp, bq_vbus_stat, chrg_stat, duration);
+    /* 终极判断：以 ZMK 是否能通信为准 */
+    bool is_pc = zmk_usb_is_hid_ready();
+    
+    uint8_t ui_vbus_stat;
+    uint16_t ui_ichg;
+
+    if (is_pc) {
+        ui_vbus_stat = 1; /* 强制告诉 UI 这是 USB */
+        ui_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA; /* 强制 300mA */
+        
+        if (!current_lowered_to_sdp) {
+            configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
+            current_lowered_to_sdp = true;
+            LOG_INF("PC connected, override to 300mA");
+        }
+    } else {
+        ui_vbus_stat = 3; /* 强制告诉 UI 这是充电器 */
+        ui_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA; /* 500mA */
+    }
+
+    LOG_INF("UI: %s, Raw_VBUS: %d, SOC=%d%%, Temp=%dC",
+            ui_vbus_stat == 1 ? "USB" : "CHG", bq_vbus_stat, soc, temp);
 
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = bq_vbus_stat,       /* 直接透传 BQ 检测到的类型 */
-        .raw_vbus = bq_vbus_stat,        /* 原始数据，与 vbus_stat 保持一致，供 UI 排查 */
+        .vbus_stat = ui_vbus_stat,
+        .raw_vbus = bq_vbus_stat,        /* 原样透传 */
         .chrg_stat = chrg_stat,
-        .ichg_ma = detected_ichg,        /* 只保留电池充电电流 */
+        .ichg_ma = ui_ichg,
         .battery_soc = soc,
         .battery_temp_c = temp,
         .charge_duration_s = duration,
@@ -158,33 +176,13 @@ static void detect_handler(struct k_work *work) {
     }
     k_msleep(CONFIG_OWLET_CHARGER_DETECT_WAIT_MS);
 
-    /* 读取 BQ25601D 原始检测值 */
     if (bq_read_reg(BQ25601D_REG08, &val) == 0) {
         bq_vbus_stat = (val & REG08_VBUS_STAT_MASK) >> 5;
     }
-    
-    LOG_INF("Raw BQ25601D Detection: %d", bq_vbus_stat);
 
-    /* 根据硬件检测的原始类型，配置三档电流 */
-    if (bq_vbus_stat == 1) { 
-        /* 1 = SDP (标准电脑口) */
-        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
-        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-    } else if (bq_vbus_stat == 2) {
-        /* 2 = CDP (充电电脑口) */
-        detected_iindpm = CONFIG_OWLET_CHARGER_CDP_IINDPM_MA;
-        detected_ichg = CONFIG_OWLET_CHARGER_CDP_ICHG_MA;
-    } else if (bq_vbus_stat == 3) { 
-        /* 3 = DCP (专用充电器) */
-        detected_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
-        detected_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
-    } else {
-        /* 未知或非标，按最安全的 SDP 处理 */
-        detected_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
-        detected_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-    }
-
-    configure_charger(detected_iindpm, detected_ichg);
+    /* 初始电流直接按最保守配，如果真的是电脑，poll_handler 会再纠正 */
+    configure_charger(CONFIG_OWLET_CHARGER_SDP_IINDPM_MA, CONFIG_OWLET_CHARGER_SDP_ICHG_MA);
+    current_lowered_to_sdp = true;
 
     gpio_pin_set(gpio0_dev, SEL_GPIO_PIN, 0);
     
@@ -197,7 +195,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
 
     int64_t now = k_uptime_get();
-    /* 3 秒硬件死区，防止切换 D+/D- 引起枚举乱跳 */
     if (now - last_detect_time < DETECT_DEAD_TIME_MS) {
         return ZMK_EV_EVENT_BUBBLE;
     }
