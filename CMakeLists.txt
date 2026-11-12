@@ -3,8 +3,7 @@
 # 路径：CMakeLists.txt
 #
 # 2026-11-12 修改记录：
-#   为 owlet_usb_switch.c 增加条件编译，避免在 settings_reset 
-#   编译时因缺少 OWLET_USB_CHARGER_SWITCH 宏定义而报错。
+#   为 owlet_usb_switch.c 增加条件编译，兼容不同 Shield 下的配置。
 # ============================================================
 target_sources_ifdef(CONFIG_OWLET_BLE_LED app PRIVATE src/owlet_leds.c)
 target_sources(app PRIVATE src/owlet_rgb_toggle.c)
