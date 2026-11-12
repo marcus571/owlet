@@ -4,6 +4,7 @@
  *
  * 2026-11-12 修改记录：
  *   Fn 层第二行增加 RGB 控制：亮度减、亮度加、色相减、色相增。
+ *   第三行恢复切屏、RGB开关、清蓝牙、Bootloader。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -14,7 +15,6 @@
 	keymap {
 		compatible = "zmk,keymap";
 
-		// 默认层 (Layer 0)
 		default_layer {
 			bindings = <
 				&mo 1       &kp CAPS      &kp KP_NUMLOCK  &kp C_MUTE
@@ -25,12 +25,11 @@
 			sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
 		};
 
-		// Fn 层 (Layer 1) - 按住第一行的 Fn 键触发
 		fn_layer {
 			bindings = <
-				&trans        &trans            &trans            &trans
-				&rgb_ug RGB_BRD &rgb_ug RGB_BRI &rgb_ug RGB_HUD   &rgb_ug RGB_HUI
-				&screen_swap  &owlet_rgb_toggle &bt BT_CLR_ALL    &bootloader
+				&trans         &trans            &trans          &trans
+				&rgb_ug RGB_BRD &rgb_ug RGB_BRI &rgb_ug RGB_HUD &rgb_ug RGB_HUI
+				&screen_swap   &owlet_rgb_toggle &bt BT_CLR_ALL &bootloader
 			>;
 		};
 	};
