@@ -2,12 +2,13 @@
 # 仓库根目录的 CMakeLists.txt
 # 路径：CMakeLists.txt
 #
-# 2026-11-11 修改记录：
-#   新增 include/ 目录到头文件搜索路径，用于 owlet_charger_event.h。
+# 2026-11-12 修改记录：
+#   为 owlet_usb_switch.c 增加条件编译，避免在 settings_reset 
+#   编译时因缺少 OWLET_USB_CHARGER_SWITCH 宏定义而报错。
 # ============================================================
 target_sources_ifdef(CONFIG_OWLET_BLE_LED app PRIVATE src/owlet_leds.c)
 target_sources(app PRIVATE src/owlet_rgb_toggle.c)
-target_sources(app PRIVATE src/owlet_usb_switch.c)
+target_sources_ifdef(CONFIG_OWLET_USB_CHARGER_SWITCH app PRIVATE src/owlet_usb_switch.c)
 
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
