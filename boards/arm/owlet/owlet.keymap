@@ -2,9 +2,9 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-12 修改记录：
- *   修正明度调节键码为 RGB_BRI / RGB_BRD（ZMK 官方定义）。
- *   EC11 在 Fn 层控制亮度，第一行控制饱和度，第二行控制色相与明度。
+ * 2026-11-12 A/B 测试版：
+ *   临时将第三行第二列替换为 ZMK 原生 &rgb_ug RGB_TOG，
+ *   用于排查自定义行为 &owlet_rgb_toggle 是否破坏了 Flash 保存机制。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -29,22 +29,15 @@
 				&kp A       &kp B         &kp C           &kp D
 				&kp N1      &kp N2        &kp N3          &kp N4
 			>;
-
-			/* 默认层编码器控制音量 */
 			sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
 		};
 
 		fn_layer {
 			bindings = <
-				/* 第一行：饱和度减、饱和度增 */
 				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
-				/* 第二行：色相减、色相增、明度减、明度增 */
 				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
-				/* 第三行：切屏、RGB开关、清蓝牙、Bootloader */
-				&screen_swap    &owlet_rgb_toggle &bt BT_CLR_ALL &bootloader
+				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
-
-			/* Fn 层编码器控制亮度 */
 			sensor-bindings = <&rgb_encoder>;
 		};
 	};
