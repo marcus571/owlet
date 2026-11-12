@@ -3,7 +3,8 @@
  * 路径：boards/arm/owlet/owlet.keymap
  *
  * 2026-11-12 修改记录：
- *   Fn 层增加完整的 RGB 控制键（色相、饱和度、明度），EC11 在 Fn 层控制亮度。
+ *   修正明度调节键码为 RGB_BRI / RGB_BRD（ZMK 官方定义）。
+ *   EC11 在 Fn 层控制亮度，第一行控制饱和度，第二行控制色相与明度。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -12,7 +13,6 @@
 
 / {
 	behaviors {
-		/* 定义编码器行为：顺时针亮度增，逆时针亮度减 */
 		rgb_encoder: rgb_encoder {
 			compatible = "zmk,behavior-sensor-rotate";
 			#sensor-binding-cells = <0>;
@@ -39,7 +39,7 @@
 				/* 第一行：饱和度减、饱和度增 */
 				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
 				/* 第二行：色相减、色相增、明度减、明度增 */
-				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_VAD &rgb_ug RGB_VAI
+				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
 				/* 第三行：切屏、RGB开关、清蓝牙、Bootloader */
 				&screen_swap    &owlet_rgb_toggle &bt BT_CLR_ALL &bootloader
 			>;
