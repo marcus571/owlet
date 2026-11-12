@@ -1,6 +1,6 @@
 include:
   - board: owlet
-    shield: settings_reset
-    artifact-name: owlet-settings-reset
+    shield: nice_view_gem
+    artifact-name: owlet-zmk
     snippet: zmk-usb-logging
-    cmake-args: -DCONFIG_OWLET_BLE_LED=n -DCONFIG_OWLET_USB_CHARGER_SWITCH=n
+    cmake_args: ""
