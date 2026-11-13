@@ -2,8 +2,9 @@
  * owlet_rgb_toggle.c
  * 路径：src/owlet_rgb_toggle.c
  *
- * 2026-11-13 最终修复版：
- *   使用正确的结构体 struct rgb_underglow_state 和 NVS Key "rgb/underglow/state" 强制保存 RGB 状态。
+ * 2026-11-13 修正版：
+ *   移除不匹配的 zmk_rgb_underglow_get_state 声明。
+ *   直接调用 ZMK 内部的 zmk_rgb_underglow_save_state() 来强制保存 RGB 状态。
  */
 
 #include <zephyr/kernel.h>
@@ -13,7 +14,6 @@
 #include <zmk/behavior.h>
 #include <zmk/rgb_underglow.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/settings/settings.h>
 
 LOG_MODULE_REGISTER(owlet_rgb_toggle, CONFIG_ZMK_LOG_LEVEL);
 
@@ -21,19 +21,8 @@ LOG_MODULE_REGISTER(owlet_rgb_toggle, CONFIG_ZMK_LOG_LEVEL);
 
 static const struct gpio_dt_spec power_pin = GPIO_DT_SPEC_GET(DT_NODELABEL(power_en), control_gpios);
 
-/* 声明 ZMK 内部实际使用的 RGB 状态结构体 */
-struct rgb_underglow_state {
-    uint16_t hue;
-    uint8_t saturation;
-    uint8_t brightness;
-    uint8_t animation_speed;
-    uint8_t current_effect;
-    uint16_t animation_step;
-    bool on;
-} __packed;
-
-/* 声明 ZMK 内部用于获取当前 RGB 状态的函数 */
-extern int zmk_rgb_underglow_get_state(struct rgb_underglow_state *state);
+/* 直接声明 ZMK 内部的保存函数 */
+extern int zmk_rgb_underglow_save_state(void);
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
@@ -44,14 +33,9 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     /* 2. 切换 RGB 状态 */
     zmk_rgb_underglow_toggle();
 
-    /* 3. 获取当前 RGB 状态，强制写入正确的 NVS Key */
-    struct rgb_underglow_state state;
-    if (zmk_rgb_underglow_get_state(&state) == 0) {
-        int ret = settings_save_one("rgb/underglow/state", &state, sizeof(state));
-        LOG_INF("Forced RGB save result: %d", ret);
-    } else {
-        LOG_ERR("Failed to get RGB state");
-    }
+    /* 3. 立即强制保存 */
+    int ret = zmk_rgb_underglow_save_state();
+    LOG_INF("Forced RGB save result: %d", ret);
 
     return ZMK_BEHAVIOR_OPAQUE;
 }
