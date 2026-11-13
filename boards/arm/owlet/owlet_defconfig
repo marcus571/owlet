@@ -1,9 +1,12 @@
 # ============================================================
 # owlet 板默认配置文件
 # 路径：boards/arm/owlet/owlet_defconfig
+#
+# 2026-11-13 清理记录：
+#   移除 CONFIG_ZMK_USB_LOGGING 及 LOG 相关配置。
 # ============================================================
 
-# SoC 选择
+# SoC
 CONFIG_SOC_SERIES_NRF52X=y
 CONFIG_SOC_NRF52840_QIAA=y
 
@@ -14,47 +17,47 @@ CONFIG_I2C=y
 CONFIG_SPI=y
 CONFIG_FLASH=y
 CONFIG_FLASH_MAP=y
-
-# 持久化配置
 CONFIG_FLASH_PAGE_LAYOUT=y
+
+# 持久化
 CONFIG_NVS=y
 CONFIG_SETTINGS=y
 CONFIG_SETTINGS_NVS=y
 CONFIG_BT_SETTINGS=y
 CONFIG_HWINFO=y
 
+# USB 设备栈（仅保留必要的 CDC ACM 用于刷机，不启用日志）
 CONFIG_USB_DEVICE_STACK=y
 CONFIG_USB_CDC_ACM=y
-CONFIG_LOG=y
-CONFIG_LOG_MODE_IMMEDIATE=y
-CONFIG_ZMK_USB_LOGGING=y
+
+# 蓝牙
 CONFIG_BT=y
 CONFIG_BT_PERIPHERAL=y
 CONFIG_ZMK_BLE=y
 CONFIG_ZMK_USB=y
 
-# NFC 引脚复用为 GPIO
+# NFC 引脚复用
 CONFIG_NFCT_PINS_AS_GPIOS=y
 
-# 外部电源控制（原生）
+# 外部电源控制
 CONFIG_ZMK_EXT_POWER=y
 
 # 电池燃料计
 CONFIG_ZMK_MAX17048=y
 
-# LED 指示灯底层驱动
+# LED 指示灯底层
 CONFIG_LED=y
 CONFIG_LED_GPIO=y
 CONFIG_ZMK_HID_INDICATORS=y
 
-# EC11 旋转编码器
+# EC11 编码器
 CONFIG_EC11=y
 CONFIG_EC11_TRIGGER_GLOBAL_THREAD=y
 
-# WS2812B RGB 灯带底层驱动
+# WS2812B RGB 灯带底层
 CONFIG_WS2812_STRIP=y
 
-# nice!view 显示底层驱动
+# nice!view 显示底层
 CONFIG_ZMK_DISPLAY=y
 CONFIG_LS0XX=y
 
@@ -65,11 +68,12 @@ CONFIG_BOARD_ENABLE_DCDC_HV=y
 # 引导程序与代码分区
 CONFIG_USE_DT_CODE_PARTITION=y
 
-# 其他必需配置
+# 其他必需项
 CONFIG_BT_CTLR=y
 CONFIG_REBOOT=y
 
-# 允许重启时将魔法值写入 GPREGRET 寄存器 (Bootloader 快捷键)
+# Bootloader 魔法值
 CONFIG_NRF_STORE_REBOOT_TYPE_GPREGRET=y
 
+# 构建输出
 CONFIG_BUILD_OUTPUT_UF2=y
