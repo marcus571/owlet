@@ -2,10 +2,9 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-13 清理记录：
- *   移除所有自定义 RGB 保存行为，回归 ZMK 原生 &rgb_ug。
- *   Fn 层：第一行饱和度，第二行色相与亮度，第三行功能键。
- *   编码器在 Fn 层控制亮度，默认层控制音量。
+ * 2026-11-13 修改记录：
+ *   Fn 层重排：第一行全部透明，第二行放饱和度与色相，
+ *   亮度改由 Fn+编码器控制。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -35,8 +34,8 @@
 
 		fn_layer {
 			bindings = <
-				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
-				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
+				&trans          &trans          &trans          &trans
+				&rgb_ug RGB_SAD &rgb_ug RGB_SAI &rgb_ug RGB_HUD &rgb_ug RGB_HUI
 				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
 			sensor-bindings = <&rgb_encoder>;
