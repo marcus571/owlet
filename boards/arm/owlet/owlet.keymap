@@ -2,8 +2,8 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-12 修改记录：
- *   恢复正常快捷键布局，包含切屏、RGB控制、清蓝牙、Bootloader。
+ * 2026-11-13 修改记录：
+ *   将第三行第二列恢复为 &owlet_rgb_toggle，用于执行强制保存测试。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -35,7 +35,7 @@
 			bindings = <
 				&trans          &rgb_ug RGB_SAD &rgb_ug RGB_SAI &trans
 				&rgb_ug RGB_HUD &rgb_ug RGB_HUI &rgb_ug RGB_BRD &rgb_ug RGB_BRI
-				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
+				&screen_swap    &owlet_rgb_toggle &bt BT_CLR_ALL &bootloader
 			>;
 			sensor-bindings = <&rgb_encoder>;
 		};
