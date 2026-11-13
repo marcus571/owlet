@@ -2,9 +2,8 @@
  * owlet_leds.c
  * 路径：src/owlet_leds.c
  *
- * 2026-11-05 17:00 修改记录：
- *   移除了连接超时熄灭逻辑（ble_latched_off）。
- *   现在连接正常时常亮，直到断开或进入睡眠。
+ * 2026-11-13 修改记录：
+ *   蓝牙指示灯逻辑调整：已连接时熄灭，断开/寻找配对时闪烁。
  */
 
 #include <zephyr/kernel.h>
@@ -73,8 +72,8 @@ static void ble_led_work_handler(struct k_work *work)
     ARG_UNUSED(work);
 
     if (owlet_is_connected()) {
-        /* 已连接：常亮，只定期复查是否断开 */
-        ble_led_set(true);
+        /* 已连接：熄灭，只定期复查是否断开 */
+        ble_led_set(false);
         k_work_reschedule(&ble_blink_work, K_MSEC(CONFIG_OWLET_BLE_LED_POLL_MS));
     } else {
         /* 未连接：闪烁 */
