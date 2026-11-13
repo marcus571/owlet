@@ -2,8 +2,8 @@
  * owlet_rgb_toggle.c
  * 路径：src/owlet_rgb_toggle.c
  *
- * 2026-11-13 调试记录：
- *   移除内部结构体依赖，仅保留 settings_save_one 测试，用于判断 NVS 是否可写。
+ * 2026-11-13 最终修复版：
+ *   在切换 RGB 状态后，直接获取当前 RGB 状态，并强制写入 ZMK 的标准 NVS key。
  */
 
 #include <zephyr/kernel.h>
@@ -23,13 +23,22 @@ static const struct gpio_dt_spec power_pin = GPIO_DT_SPEC_GET(DT_NODELABEL(power
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
+    /* 1. 拉高电源使能引脚 */
     gpio_pin_set_dt(&power_pin, 1);
     k_msleep(100);
+
+    /* 2. 切换 RGB 状态 */
     zmk_rgb_underglow_toggle();
 
-    /* 测试 NVS 是否根本拒绝写入 */
-    int ret = settings_save_one("owlet/test", "test", 4);
-    LOG_INF("NVS test write result: %d", ret);
+    /* 3. 获取当前 RGB 状态，强制写入 ZMK 标准 NVS key */
+    struct zmk_rgb_underglow_state state;
+    if (zmk_rgb_underglow_get_state(&state) == 0) {
+        int ret = settings_save_one("rgb_underglow/state", &state, sizeof(state));
+        LOG_INF("Forced RGB save result: %d", ret);
+    } else {
+        LOG_ERR("Failed to get RGB state");
+    }
+
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
