@@ -2,5 +2,4 @@ include:
   - board: owlet
     shield: nice_view_gem
     artifact-name: owlet-zmk
-    snippet: zmk-usb-logging
     cmake_args: ""
