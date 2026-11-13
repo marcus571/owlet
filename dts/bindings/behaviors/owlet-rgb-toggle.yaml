@@ -1,3 +1,0 @@
-description: Owlet RGB toggle behavior with power sequencing
-compatible: "zmk,behavior-owlet-rgb-toggle"
-include: zero_param.yaml
