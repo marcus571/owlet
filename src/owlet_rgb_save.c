@@ -2,9 +2,9 @@
  * owlet_rgb_save.c
  * 路径：src/owlet_rgb_save.c
  *
- * 2026-11-14 修改记录（方案A验证，修正 HSB 函数参数）：
- *   不读取任何当前 state，直接硬编码设定纯绿色 HSB(120, 100, 20)，
- *   然后立即保存。用于验证 Flash 存储链路本身是否正常。
+ * 2026-11-14 修改记录（方案A验证，修正结构体与参数）：
+ *   移除自定义 struct zmk_led_hsb，直接使用 ZMK 内部的 struct led_hsb。
+ *   硬编码设定纯绿色 HSB(120, 100, 20)，然后立即保存。
  */
 
 #include <zephyr/kernel.h>
@@ -20,17 +20,10 @@ LOG_MODULE_REGISTER(owlet_rgb_save, CONFIG_ZMK_LOG_LEVEL);
 
 extern int zmk_rgb_underglow_save_state(void);
 
-/* ZMK 内部使用的 HSB 结构体定义 */
-struct zmk_led_hsb {
-    uint16_t h;
-    uint8_t s;
-    uint8_t b;
-};
-
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
-    /* 硬编码设定纯绿色 HSB(120, 100, 20) */
-    struct zmk_led_hsb color = { .h = 120, .s = 100, .b = 20 };
+    /* 使用 ZMK 内部结构体 led_hsb 硬编码纯绿色 HSB(120, 100, 20) */
+    struct led_hsb color = { .h = 120, .s = 100, .b = 20 };
     int ret_set = zmk_rgb_underglow_set_hsb(color);
     /* 立即保存 */
     int ret_save = zmk_rgb_underglow_save_state();
