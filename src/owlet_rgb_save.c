@@ -2,10 +2,9 @@
  * owlet_rgb_save.c
  * 路径：src/owlet_rgb_save.c
  *
- * 2026-11-14 修改记录（方案B验证）：
- *   在调用 zmk_rgb_underglow_save_state() 之前，连续调用两次
- *   zmk_rgb_underglow_toggle()，强制同步内存中的 RGB 状态结构体，
- *   验证“state 脱节导致保存幽灵色”的推断。
+ * 2026-11-14 修改记录（方案A验证）：
+ *   不读取任何当前 state，直接硬编码设定纯绿色 HSB(120, 100, 20)，
+ *   然后立即保存。用于验证 Flash 存储链路本身是否正常。
  */
 
 #include <zephyr/kernel.h>
@@ -23,13 +22,11 @@ extern int zmk_rgb_underglow_save_state(void);
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
-    /* 1. 第一次 toggle：强制 ZMK 同步并刷新内部 state */
-    zmk_rgb_underglow_toggle();
-    /* 2. 第二次 toggle：切回原状态，再次刷新 state */
-    zmk_rgb_underglow_toggle();
-    /* 3. 保存 */
-    int ret = zmk_rgb_underglow_save_state();
-    LOG_INF("Force-sync save result: %d", ret);
+    /* 硬编码设定纯绿色 HSB(120, 100, 20) */
+    int ret_set = zmk_rgb_underglow_set_hsb(120, 100, 20);
+    /* 立即保存 */
+    int ret_save = zmk_rgb_underglow_save_state();
+    LOG_INF("Hardcode set=%d, save=%d", ret_set, ret_save);
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
