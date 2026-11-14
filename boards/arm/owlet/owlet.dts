@@ -2,6 +2,10 @@
 /*
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
+ *
+ * 2026-11-14 清理记录：
+ *   移除悬空的 owlet_rgb_toggle 行为节点。
+ *   移除 cdc_acm_uart 节点及 console/shell-uart 引用，仅保留 USB HID。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -16,21 +20,12 @@
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &code_partition;
-		zephyr,console = &cdc_acm_uart;
-		zephyr,shell-uart = &cdc_acm_uart;
 		zephyr,display = &nice_view;
 		zmk,kscan = &kscan0;
 		zmk,matrix_transform = &default_transform;
 		zmk,battery = &max17048;
 		zmk,underglow = &led_strip;
 		zmk,power-control = &power_en;
-	};
-
-	behaviors {
-		owlet_rgb_toggle: owlet_rgb_toggle {
-			compatible = "zmk,behavior-owlet-rgb-toggle";
-			#binding-cells = <0>;
-		};
 	};
 
 	aliases {
@@ -185,10 +180,6 @@ nice_view_spi: &spi1 {
 
 zephyr_udc0: &usbd {
 	status = "okay";
-	cdc_acm_uart: cdc_acm_uart {
-		compatible = "zephyr,cdc-acm-uart";
-		label = "CDC_ACM_0";
-	};
 };
 
 &flash0 {
