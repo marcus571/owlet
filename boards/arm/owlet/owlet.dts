@@ -31,10 +31,6 @@
 			compatible = "zmk,behavior-owlet-rgb-toggle";
 			#binding-cells = <0>;
 		};
-		owlet_rgb_save: owlet_rgb_save {
-			compatible = "zmk,behavior-owlet-rgb-save";
-			#binding-cells = <0>;
-		};
 	};
 
 	aliases {
