@@ -2,8 +2,8 @@
 # 仓库根目录的 Kconfig
 # 路径：Kconfig
 #
-# 2026-11-12 修改记录：
-#   新增 CDP (充电电脑口) 的电流配置选项。
+# 2026-11-14 清理记录：
+#   移除不再使用的 CDP 电流配置项。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -47,38 +47,18 @@ config OWLET_CHARGER_I2C_ADDR
 config OWLET_CHARGER_SDP_IINDPM_MA
 	int "标准电脑口 (SDP) 输入限流 (mA)"
 	default 300
-	help
-	  配置 BQ25601D 的 IINDPM (步进 100mA)。
 
 config OWLET_CHARGER_SDP_ICHG_MA
 	int "标准电脑口 (SDP) 电池充电电流 (mA)"
 	default 300
-	help
-	  配置 BQ25601D 的 ICHG (步进 60mA)。
-
-config OWLET_CHARGER_CDP_IINDPM_MA
-	int "充电电脑口 (CDP) 输入限流 (mA)"
-	default 500
-	help
-	  配置 BQ25601D 的 IINDPM (步进 100mA)。
-
-config OWLET_CHARGER_CDP_ICHG_MA
-	int "充电电脑口 (CDP) 电池充电电流 (mA)"
-	default 500
-	help
-	  配置 BQ25601D 的 ICHG (步进 60mA)。
 
 config OWLET_CHARGER_DCP_IINDPM_MA
 	int "专用充电器 (DCP) 输入限流 (mA)"
 	default 500
-	help
-	  配置 BQ25601D 的 IINDPM (步进 100mA)。
 
 config OWLET_CHARGER_DCP_ICHG_MA
 	int "专用充电器 (DCP) 电池充电电流 (mA)"
 	default 500
-	help
-	  配置 BQ25601D 的 ICHG (步进 60mA)。
 
 config OWLET_CHARGER_SEL_SETTLE_MS
 	int "FSUSB43 SEL 切换稳定时间 (ms)"
@@ -91,7 +71,5 @@ config OWLET_CHARGER_DETECT_WAIT_MS
 config OWLET_CHARGER_POLL_INTERVAL_MS
 	int "充电状态轮询间隔 (ms)"
 	default 1000
-	help
-	  充电期间读取电量、温度和充电状态的周期。
 
 endif # OWLET_USB_CHARGER_SWITCH
