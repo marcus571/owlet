@@ -2,8 +2,10 @@
  * owlet_leds.c
  * 路径：src/owlet_leds.c
  *
- * 2026-11-13 修改记录：
- *   蓝牙指示灯逻辑调整：已连接时熄灭，断开/寻找配对时闪烁。
+ * 2026-11-14 修改记录：
+ *   1. 蓝牙指示灯：已连接常灭，断开/寻配对闪烁（此前已改）。
+ *   2. 在进入深睡前，强制调用 zmk_rgb_underglow_save_state() 作为后备保存机制。
+ *      由于 Zephyr settings 子系统自带数据比对，状态未改变时不会产生 Flash 写入。
  */
 
 #include <zephyr/kernel.h>
@@ -15,11 +17,15 @@
 #include <zmk/activity.h>
 #include <zmk/ble.h>
 #include <zmk/usb.h>
+#include <zmk/rgb_underglow.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/events/hid_indicators_changed.h>
 
 LOG_MODULE_REGISTER(owlet_leds, CONFIG_ZMK_LOG_LEVEL);
+
+/* 声明 ZMK 内部的 RGB 保存函数 */
+extern int zmk_rgb_underglow_save_state(void);
 
 /* 标准 HID 协议 LED 状态位 */
 #define OWLET_HID_INDICATOR_NUM_LOCK  (1 << 0)
@@ -45,7 +51,7 @@ static const struct gpio_dt_spec num_led = GPIO_DT_SPEC_GET(NUM_LED_NODE, gpios)
 #endif
 
 /* ============================= 全局状态缓存 ============================ */
-static uint32_t cached_hid_indicators = 0; /* 缓存当前锁定状态，供唤醒时恢复 */
+static uint32_t cached_hid_indicators = 0;
 
 /* ============================= 蓝牙灯状态 ============================== */
 static struct k_work_delayable ble_blink_work;
@@ -95,7 +101,6 @@ static int owlet_hid_indicators_cb(const zmk_event_t *eh) {
     const struct zmk_hid_indicators_changed *ev = as_zmk_hid_indicators_changed(eh);
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
 
-    /* 更新缓存，供唤醒时恢复 */
     cached_hid_indicators = ev->indicators;
 
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
@@ -115,7 +120,10 @@ static int owlet_activity_cb(const zmk_event_t *eh) {
     const struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
     if (ev) {
         if (ev->state == ZMK_ACTIVITY_SLEEP) {
-            /* 进入睡眠：熄灭所有灯并停止蓝牙轮询 */
+            /* 进入睡眠：强制保存 RGB 状态作为后备，然后熄灭所有灯并停止轮询 */
+            zmk_rgb_underglow_save_state();
+            LOG_INF("Sleep: RGB state save triggered");
+
             ble_led_stop();
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
             gpio_pin_set_dt(&caps_led, 0);
