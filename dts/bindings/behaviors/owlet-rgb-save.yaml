@@ -1,0 +1,4 @@
+# 路径: dts/bindings/behaviors/owlet-rgb-save.yaml
+description: Manual RGB save behavior
+compatible: "zmk,behavior-owlet-rgb-save"
+include: zero_param.yaml
