@@ -3,8 +3,8 @@
  * 路径：boards/arm/owlet/owlet.keymap
  *
  * 2026-11-14 修改记录：
- *   1. Fn 层第一行第二列绑定 &owlet_rgb_save 手动保存颜色方案。
- *   2. 交换 EC11 编码器方向：默认层和 Fn 层的增减顺序对调。
+ *   移除 &owlet_rgb_save 绑定，第一行第二列恢复 &trans。
+ *   保留 Fn 层饱和度、色相、编码器亮度调节。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -36,7 +36,7 @@
 
 		fn_layer {
 			bindings = <
-				&trans          &owlet_rgb_save &trans          &trans
+				&trans          &trans          &trans          &trans
 				&rgb_ug RGB_SAD &rgb_ug RGB_SAI &rgb_ug RGB_HUD &rgb_ug RGB_HUI
 				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
