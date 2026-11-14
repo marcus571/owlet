@@ -2,9 +2,8 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-13 修改记录：
- *   Fn 层重排：第一行全部透明，第二行放饱和度与色相，
- *   亮度改由 Fn+编码器控制。
+ * 2026-11-14 修改记录：
+ *   Fn 层第一行第二列绑定 &owlet_rgb_save 手动保存颜色方案。
  */
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
@@ -34,7 +33,7 @@
 
 		fn_layer {
 			bindings = <
-				&trans          &trans          &trans          &trans
+				&trans          &owlet_rgb_save &trans          &trans
 				&rgb_ug RGB_SAD &rgb_ug RGB_SAI &rgb_ug RGB_HUD &rgb_ug RGB_HUI
 				&screen_swap    &rgb_ug RGB_TOG &bt BT_CLR_ALL  &bootloader
 			>;
