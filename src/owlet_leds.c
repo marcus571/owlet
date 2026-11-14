@@ -3,9 +3,10 @@
  * 路径：src/owlet_leds.c
  *
  * 2026-11-14 修改记录：
- *   1. 蓝牙指示灯：已连接常灭，断开/寻配对闪烁（此前已改）。
- *   2. 在进入深睡前，强制调用 zmk_rgb_underglow_save_state() 作为后备保存机制。
- *      由于 Zephyr settings 子系统自带数据比对，状态未改变时不会产生 Flash 写入。
+ *   1. 蓝牙指示灯：已连接常灭，断开/寻配对闪烁。
+ *   2. 将 RGB 强制保存的时机从 SLEEP 提前到 IDLE。
+ *      在系统尚未进入低功耗、RGB 状态尚未被 AUTO_OFF_IDLE 等逻辑干扰前，
+ *      提前将用户当前调好的颜色方案写入 Flash。
  */
 
 #include <zephyr/kernel.h>
@@ -119,11 +120,13 @@ ZMK_SUBSCRIPTION(owlet_hid_led, zmk_hid_indicators_changed);
 static int owlet_activity_cb(const zmk_event_t *eh) {
     const struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
     if (ev) {
-        if (ev->state == ZMK_ACTIVITY_SLEEP) {
-            /* 进入睡眠：强制保存 RGB 状态作为后备，然后熄灭所有灯并停止轮询 */
+        if (ev->state == ZMK_ACTIVITY_IDLE) {
+            /* 进入空闲：在系统尚未进入低功耗、RGB状态尚未被AUTO_OFF干扰前，强制保存 */
             zmk_rgb_underglow_save_state();
-            LOG_INF("Sleep: RGB state save triggered");
+            LOG_INF("Idle: RGB state save triggered");
 
+        } else if (ev->state == ZMK_ACTIVITY_SLEEP) {
+            /* 进入睡眠：熄灭所有灯并停止蓝牙轮询 */
             ble_led_stop();
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
             gpio_pin_set_dt(&caps_led, 0);
