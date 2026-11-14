@@ -2,8 +2,8 @@
 # owlet 板默认配置文件
 # 路径：boards/arm/owlet/owlet_defconfig
 #
-# 2026-11-13 清理记录：
-#   移除 CONFIG_ZMK_USB_LOGGING 及 LOG 相关配置。
+# 2026-11-14 清理记录：
+#   移除日志相关配置与 USB CDC ACM（已不再使用）。
 # ============================================================
 
 # SoC
@@ -26,9 +26,8 @@ CONFIG_SETTINGS_NVS=y
 CONFIG_BT_SETTINGS=y
 CONFIG_HWINFO=y
 
-# USB 设备栈（仅保留必要的 CDC ACM 用于刷机，不启用日志）
+# USB 设备栈（仅 HID，无 CDC ACM）
 CONFIG_USB_DEVICE_STACK=y
-CONFIG_USB_CDC_ACM=y
 
 # 蓝牙
 CONFIG_BT=y
