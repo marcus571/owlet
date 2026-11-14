@@ -2,9 +2,8 @@
  * owlet_rgb_save.c
  * 路径：src/owlet_rgb_save.c
  *
- * 2026-11-14 修改记录（方案A验证，修正结构体与参数）：
- *   移除对内部 struct led_hsb 的直接引用。
- *   改用公开宏 RGB_COLOR_HSB(120, 100, 20) 硬编码纯绿色，然后立即保存。
+ * 2026-11-14 修改记录（方案A验证，修正结构体）：
+ *   直接使用 ZMK 内部定义的 struct led_hsb 硬编码纯绿色 HSB(120, 100, 20)。
  */
 
 #include <zephyr/kernel.h>
@@ -22,8 +21,9 @@ extern int zmk_rgb_underglow_save_state(void);
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
-    /* 使用公开宏 RGB_COLOR_HSB 硬编码纯绿色 HSB(120, 100, 20) */
-    zmk_rgb_underglow_set_hsb(RGB_COLOR_HSB(120, 100, 20));
+    /* 直接使用 ZMK 内部结构体 led_hsb 硬编码纯绿色 HSB(120, 100, 20) */
+    struct led_hsb color = { .h = 120, .s = 100, .b = 20 };
+    zmk_rgb_underglow_set_hsb(color);
     /* 立即保存 */
     int ret_save = zmk_rgb_underglow_save_state();
     LOG_INF("Hardcode save=%d", ret_save);
