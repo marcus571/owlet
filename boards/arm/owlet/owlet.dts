@@ -4,11 +4,7 @@
  * 路径：boards/arm/owlet/owlet.dts
  *
  * 2026-11-19 修改记录：
- *   1. 更新引脚映射：EC11 A=P1.08/B=P0.07，Caps=P0.30/Num=P0.28，
- *      I2C SDA=P0.26/SCL=P0.06，nice!view SI=P0.08/SCS=P1.09/SCLK=P0.19，
- *      灯带信号=P0.29。
- *   2. 移除 BQ25601D 的 FSUSB43 SEL 引脚（P0.11）。
- *   3. 新增 BQ25601 的 INT 引脚（P0.12）定义为 gpio-keys 节点。
+ *   移除 bq25601_int 预留节点（当前不使用中断功能，且该节点写法导致 DTS 解析错误）。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -91,14 +87,6 @@
 		compatible = "zmk,ext-power-generic";
 		control-gpios = <&gpio0 13 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		label = "External power control";
-	};
-
-	/* BQ25601 中断引脚预留，本轮仅硬件描述，暂不启用中断服务程序 */
-	bq25601_int: bq25601-int {
-		compatible = "gpio-keys";
-		gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
-		label = "BQ25601 INT";
-		status = "disabled";
 	};
 };
 
