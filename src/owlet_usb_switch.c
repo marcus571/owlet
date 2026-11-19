@@ -2,12 +2,8 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-19 修改记录：
- *   1. 移除 FSUSB43 SEL 引脚控制。
- *   2. 移除 BQ25601D REG08 VBUS_STAT 检测逻辑。
- *   3. 保留通过 zmk_usb_is_hid_ready() 判断接口类型。
- *   4. 电流配置改为 USB 200mA / 充电器 400mA。
- *   5. 保留 MAX17048 电压读取（通过 I2C 直接读取 VCELL 寄存器）。
+ * 2026-11-19 调试记录：
+ *   临时硬编码 vbus_stat=1、ichg_ma=200，验证事件传递是否正常。
  */
 
 #include <zephyr/kernel.h>
@@ -44,8 +40,7 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
 
-/* 记录初次检测的结果 */
-static uint8_t detected_vbus_stat = 1; /* 默认按 SDP 处理 */
+static uint8_t detected_vbus_stat = 1;
 static uint16_t detected_iindpm = 0;
 static uint16_t detected_ichg = 0;
 
@@ -81,7 +76,6 @@ static uint16_t read_battery_voltage_mv(void) {
 }
 
 static void poll_handler(struct k_work *work) {
-    int16_t temp = 0;
     uint8_t soc = 0;
 
     uint8_t raw_soc = zmk_battery_state_of_charge();
@@ -91,31 +85,12 @@ static void poll_handler(struct k_work *work) {
 
     uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
 
-    bool is_pc = zmk_usb_is_hid_ready();
-    uint8_t ui_vbus_stat;
-    uint16_t target_iindpm, target_ichg;
-
-    if (is_pc) {
-        ui_vbus_stat = 1;
-        target_iindpm = CONFIG_OWLET_CHARGER_SDP_IINDPM_MA;
-        target_ichg = CONFIG_OWLET_CHARGER_SDP_ICHG_MA;
-    } else {
-        ui_vbus_stat = 3;
-        target_iindpm = CONFIG_OWLET_CHARGER_DCP_IINDPM_MA;
-        target_ichg = CONFIG_OWLET_CHARGER_DCP_ICHG_MA;
-    }
-
-    if (target_iindpm != detected_iindpm || target_ichg != detected_ichg) {
-        configure_charger(target_iindpm, target_ichg);
-        detected_iindpm = target_iindpm;
-        detected_ichg = target_ichg;
-    }
-
+    /* 临时硬编码，验证事件传递 */
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
-        .vbus_stat = ui_vbus_stat,
+        .vbus_stat = 1,
         .chrg_stat = 2,
-        .ichg_ma = target_ichg,
+        .ichg_ma = 200,
         .battery_soc = soc,
         .battery_voltage_mv = vbat_mv,
         .charge_duration_s = duration,
