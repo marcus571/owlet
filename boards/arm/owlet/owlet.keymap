@@ -2,7 +2,7 @@
  * owlet 键位映射文件
  * 路径：boards/arm/owlet/owlet.keymap
  *
- * 2026-11-14 修改记录：
+ * 2026-11-19 修改记录：
  *   对调 EC11 编码器方向，修正音量与亮度增减反相的问题。
  */
 #include <behaviors.dtsi>
@@ -15,8 +15,8 @@
 		rgb_encoder: rgb_encoder {
 			compatible = "zmk,behavior-sensor-rotate";
 			#sensor-binding-cells = <0>;
-			/* 对调后：顺时针亮度减，逆时针亮度增 */
-			bindings = <&rgb_ug RGB_BRD>, <&rgb_ug RGB_BRI>;
+			/* 顺时针：亮度增；逆时针：亮度减 */
+			bindings = <&rgb_ug RGB_BRI>, <&rgb_ug RGB_BRD>;
 		};
 	};
 
@@ -29,8 +29,8 @@
 				&kp A       &kp B         &kp C           &kp D
 				&kp N1      &kp N2        &kp N3          &kp N4
 			>;
-			/* 对调后：顺时针音量减，逆时针音量增 */
-			sensor-bindings = <&inc_dec_kp C_VOL_DN C_VOL_UP>;
+			/* 顺时针：音量增；逆时针：音量减 */
+			sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
 		};
 
 		fn_layer {
