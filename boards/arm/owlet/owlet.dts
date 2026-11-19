@@ -3,9 +3,12 @@
  * owlet 板级设备树配置文件
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-14 清理记录：
- *   移除悬空的 owlet_rgb_toggle 行为节点。
- *   移除 cdc_acm_uart 节点及 console/shell-uart 引用，仅保留 USB HID。
+ * 2026-11-19 修改记录：
+ *   1. 更新引脚映射：EC11 A=P1.08/B=P0.07，Caps=P0.30/Num=P0.28，
+ *      I2C SDA=P0.26/SCL=P0.06，nice!view SI=P0.08/SCS=P1.09/SCLK=P0.19，
+ *      灯带信号=P0.29。
+ *   2. 移除 BQ25601D 的 FSUSB43 SEL 引脚（P0.11）。
+ *   3. 新增 BQ25601 的 INT 引脚（P0.12）定义为 gpio-keys 节点。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -44,8 +47,8 @@
 	left_encoder: encoder_left {
 		compatible = "alps,ec11";
 		label = "LEFT_ENCODER";
-		a-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		b-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		a-gpios = <&gpio1 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		b-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		steps = <80>;
 		status = "disabled";
 	};
@@ -89,26 +92,34 @@
 		control-gpios = <&gpio0 13 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		label = "External power control";
 	};
+
+	/* BQ25601 中断引脚预留，本轮仅硬件描述，暂不启用中断服务程序 */
+	bq25601_int: bq25601-int {
+		compatible = "gpio-keys";
+		gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+		label = "BQ25601 INT";
+		status = "disabled";
+	};
 };
 
 &left_encoder { status = "okay"; };
 
 &pinctrl {
-	spi1_default: spi1_default { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; }; };
-	spi1_sleep: spi1_sleep { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 8)>, <NRF_PSEL(SPIM_MOSI, 1, 9)>; low-power-enable; }; };
+	spi1_default: spi1_default { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 19)>, <NRF_PSEL(SPIM_MOSI, 0, 8)>; }; };
+	spi1_sleep: spi1_sleep { group1 { psels = <NRF_PSEL(SPIM_SCK, 0, 19)>, <NRF_PSEL(SPIM_MOSI, 0, 8)>; low-power-enable; }; };
 	
 	spi3_default: spi3_default { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; }; };
 	spi3_sleep: spi3_sleep { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; low-power-enable; }; };
 	
 	i2c0_default: i2c0_default { 
 		group1 { 
-			psels = <NRF_PSEL(TWIM_SCL, 0, 26)>, <NRF_PSEL(TWIM_SDA, 0, 6)>; 
+			psels = <NRF_PSEL(TWIM_SCL, 0, 6)>, <NRF_PSEL(TWIM_SDA, 0, 26)>; 
 			bias-pull-up;
 		}; 
 	};
 	i2c0_sleep: i2c0_sleep { 
 		group1 { 
-			psels = <NRF_PSEL(TWIM_SCL, 0, 26)>, <NRF_PSEL(TWIM_SDA, 0, 6)>; 
+			psels = <NRF_PSEL(TWIM_SCL, 0, 6)>, <NRF_PSEL(TWIM_SDA, 0, 26)>; 
 			bias-pull-up;
 			low-power-enable;
 		}; 
@@ -121,7 +132,7 @@ nice_view_spi: &spi1 {
 	pinctrl-0 = <&spi1_default>;
 	pinctrl-1 = <&spi1_sleep>;
 	pinctrl-names = "default", "sleep";
-	cs-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+	cs-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 
@@ -167,8 +178,8 @@ nice_view_spi: &spi1 {
 		reg = <0x36>;
 	};
 
-	bq25601d: bq25601d@6b {
-		compatible = "ti,bq25601d";
+	bq25601: bq25601@6b {
+		compatible = "ti,bq25601";
 		reg = <0x6b>;
 		status = "okay";
 	};
