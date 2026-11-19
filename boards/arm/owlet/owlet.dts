@@ -4,7 +4,7 @@
  * 路径：boards/arm/owlet/owlet.dts
  *
  * 2026-11-19 修改记录：
- *   移除 bq25601_int 预留节点（当前不使用中断功能，且该节点写法导致 DTS 解析错误）。
+ *   为 &usbd 补上 compatible 属性，并恢复 cdc_acm_uart 子节点，修复 USB 无法枚举的问题。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -178,7 +178,13 @@ nice_view_spi: &spi1 {
 &gpio1  { status = "okay"; };
 
 zephyr_udc0: &usbd {
+	compatible = "nordic,nrf-usbd";
 	status = "okay";
+
+	cdc_acm_uart: cdc_acm_uart {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+	};
 };
 
 &flash0 {
