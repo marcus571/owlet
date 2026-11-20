@@ -2,8 +2,9 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-19 调试记录：
- *   临时硬编码 vbus_stat=1、ichg_ma=200，验证事件传递是否正常。
+ * 2026-11-20 调试记录：
+ *   硬编码电池电压为 9900mV（9.9V）、电量为 99%、充电时长为 99s、
+ *   电流为 99mA，用于在 UI 上验证事件数据是否被正确解析。
  */
 
 #include <zephyr/kernel.h>
@@ -64,7 +65,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     }
 }
 
-/* 直接读取 MAX17048 的 VCELL 寄存器获取电压 */
 static uint16_t read_battery_voltage_mv(void) {
     uint8_t buf[2];
     if (i2c_burst_read(i2c_dev, MAX17048_ADDR, MAX17048_REG_VCELL, buf, 2) != 0) {
@@ -76,24 +76,15 @@ static uint16_t read_battery_voltage_mv(void) {
 }
 
 static void poll_handler(struct k_work *work) {
-    uint8_t soc = 0;
-
-    uint8_t raw_soc = zmk_battery_state_of_charge();
-    if (raw_soc <= 100) soc = raw_soc;
-
-    uint16_t vbat_mv = read_battery_voltage_mv();
-
-    uint32_t duration = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
-
-    /* 临时硬编码，验证事件传递 */
+    /* 硬编码固定值，用于验证 UI 数据解析 */
     struct owlet_charger_state_changed ev = {
         .is_charging = true,
         .vbus_stat = 1,
         .chrg_stat = 2,
-        .ichg_ma = 200,
-        .battery_soc = soc,
-        .battery_voltage_mv = vbat_mv,
-        .charge_duration_s = duration,
+        .ichg_ma = 99,
+        .battery_soc = 99,
+        .battery_voltage_mv = 9900,
+        .charge_duration_s = 99,
     };
     raise_owlet_charger_state_changed(ev);
 
