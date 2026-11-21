@@ -2,21 +2,16 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-21 修复记录（第三轮，依据 BQ25601 手册 ZHCSGA3A 核对）：
- *   1. 快速刷新必须以 zmk_usb_is_hid_ready() 实际就绪为门槛。
- *      ZMK 把 SUSPEND/RESUME 也映射为 HID 状态，原逻辑在枚举完成前
- *      就触发轮询，导致插电脑先误显示 CHG/400mA。
- *   2. 插入后 2 秒判定窗口内未枚举成功则保持 UNK + 硬件默认电流，
- *      不提前写入 SDP/DCP 配置（INT 触发的早期刷新同样受此约束）。
- *   3. REG00 IINDPM 编码修正：偏移 100mA、步进 100mA，code=(mA-100)/100。
- *   4. REG02 ICHG 步进 60mA：设定值就近取整，并回读实际值用于显示。
- *   5. CHRG_STAT 改为实时读取 REG08[4:3]：
- *      00 未充电 / 01 预充 / 10 快充 / 11 充电完成。
- *   6. 看门狗：REG05[5:4]=00 关闭（默认 40s）；删除 REG01 WD_RST 脉冲，
- *      该操作会把全部寄存器复位回默认值（ICHG 回到 2040mA）。
- *   7. INT（P0.12，开漏低有效 256us 脉冲）下降沿中断触发立即刷新；
- *      每轮双读 REG09 清除锁存故障（否则芯片不再发新 INT）；
- *      REG0A[1:0]=11 屏蔽 VINDPM/IINDPM 中断，避免 DPM 期间频繁触发。
+ * 2026-11-21 修复记录（第四轮）：
+ *   显示值与芯片真实值对齐（铁律）：
+ *   1. 判定后每轮直接回读 REG02，Set 显示芯片内实际 ICHG 设定，
+ *      不再依赖软件缓存，寄存器即使被外部复位显示也会如实跟随。
+ *   2. UNK 阶段改为回读 REG00 输入限流（PSEL=高时芯片默认 500mA），
+ *      不再显示写死的配置常数；回读失败才退回配置默认值。
+ *   其余逻辑与第三轮一致：HID 就绪门槛、2 秒判定窗口、
+ *   IINDPM 偏移 100mA 编码、ICHG 60mA 步进取整、
+ *   REG08 真实充电阶段、看门狗关闭、INT(P0.12) 立即刷新、
+ *   REG09 双读清故障、REG0A 屏蔽 DPM 中断。
  */
 
 #include <zephyr/kernel.h>
@@ -132,6 +127,15 @@ static uint16_t read_ichg_actual_ma(void) {
     return 0;
 }
 
+/* 回读芯片内实际的输入限流（UNK 阶段的实际约束，PSEL=高默认 500mA） */
+static uint16_t read_iindpm_actual_ma(void) {
+    uint8_t val;
+    if (bq_read_reg(BQ25601_REG00, &val) == 0) {
+        return (uint16_t)((val & REG00_IINDPM_MASK) + 1) * 100;
+    }
+    return 0;
+}
+
 /* REG08[4:3]：00 未充电 / 01 预充 / 10 快充 / 11 充电完成 */
 static uint8_t read_chrg_stat(void) {
     uint8_t val;
@@ -176,7 +180,7 @@ static void poll_handler(struct k_work *work) {
     int64_t elapsed_ms = k_uptime_get() - charge_start_time;
     bool is_pc = zmk_usb_is_hid_ready();
 
-    /* 判定窗口内未枚举成功：保持 UNK + 硬件默认电流，不写芯片配置 */
+    /* 判定窗口内未枚举成功：保持 UNK，不写芯片配置 */
     if (is_pc || elapsed_ms >= OWLET_FIRST_POLL_DELAY_MS) {
         uint8_t ui_vbus_stat;
         uint16_t target_iindpm, target_ichg;
@@ -194,17 +198,21 @@ static void poll_handler(struct k_work *work) {
         if (target_iindpm != detected_iindpm || target_ichg != detected_ichg) {
             configure_charger(target_iindpm, target_ichg);
             detected_iindpm = target_iindpm;
-            detected_ichg = read_ichg_actual_ma();
-            if (detected_ichg == 0) {
-                detected_ichg = target_ichg; /* 回读失败时退回目标值 */
-            }
+            detected_ichg = target_ichg;
         }
 
+        /* 铁律：每轮回读 REG02，显示芯片内真实设定值 */
+        uint16_t actual_ichg = read_ichg_actual_ma();
         charger_ev.vbus_stat = ui_vbus_stat;
-        charger_ev.ichg_ma = detected_ichg;
+        charger_ev.ichg_ma = (actual_ichg != 0) ? actual_ichg : target_ichg;
     } else {
-        charger_ev.vbus_stat = 0; /* UNK */
-        charger_ev.ichg_ma = CONFIG_OWLET_CHARGER_DEFAULT_ICHG_MA;
+        /* UNK 阶段：回读芯片实际输入限流（首次插入 PSEL 默认 500mA，
+         * 再次插入为芯片保留的上次设定），回读失败才用配置默认值 */
+        uint16_t actual_iindpm = read_iindpm_actual_ma();
+        charger_ev.vbus_stat = 0;
+        charger_ev.ichg_ma = (actual_iindpm != 0)
+                                 ? actual_iindpm
+                                 : CONFIG_OWLET_CHARGER_DEFAULT_ICHG_MA;
     }
 
     charger_ev.is_charging = true;
@@ -216,12 +224,16 @@ static void poll_handler(struct k_work *work) {
     raise_owlet_charger_state_changed(charger_ev);
 }
 
-/* 插入瞬间的初始状态：接口类型未知，电流按硬件默认值 */
+/* 插入瞬间的初始状态：接口类型未知，电流回读芯片实际限流 */
 static void publish_initial_state(void) {
+    uint16_t actual_iindpm = read_iindpm_actual_ma();
+
     charger_ev.is_charging = true;
     charger_ev.vbus_stat = 0;
     charger_ev.chrg_stat = read_chrg_stat();
-    charger_ev.ichg_ma = CONFIG_OWLET_CHARGER_DEFAULT_ICHG_MA;
+    charger_ev.ichg_ma = (actual_iindpm != 0)
+                             ? actual_iindpm
+                             : CONFIG_OWLET_CHARGER_DEFAULT_ICHG_MA;
     charger_ev.battery_soc = read_battery_soc();
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = 0;
