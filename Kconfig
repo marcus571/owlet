@@ -5,6 +5,8 @@
 # 2026-11-19 修改记录：
 #   移除 FSUSB43 SEL 相关配置项。
 #   新增 BQ25601 电流配置项。
+# 2026-11-21 修改记录：
+#   新增 OWLET_CHARGER_DEFAULT_ICHG_MA，用于插入瞬间显示硬件默认的 500mA。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -40,6 +42,10 @@ if OWLET_USB_CHARGER_SWITCH
 config OWLET_CHARGER_I2C_ADDR
 	hex "BQ25601 I2C 地址"
 	default 0x6B
+
+config OWLET_CHARGER_DEFAULT_ICHG_MA
+	int "硬件默认充电电流 (mA)，插入瞬间显示用"
+	default 500
 
 config OWLET_CHARGER_SDP_IINDPM_MA
 	int "标准电脑口 (SDP) 输入限流 (mA)"
