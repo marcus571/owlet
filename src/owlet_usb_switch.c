@@ -2,16 +2,14 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-21 修复记录（第四轮）：
- *   显示值与芯片真实值对齐（铁律）：
- *   1. 判定后每轮直接回读 REG02，Set 显示芯片内实际 ICHG 设定，
- *      不再依赖软件缓存，寄存器即使被外部复位显示也会如实跟随。
- *   2. UNK 阶段改为回读 REG00 输入限流（PSEL=高时芯片默认 500mA），
- *      不再显示写死的配置常数；回读失败才退回配置默认值。
- *   其余逻辑与第三轮一致：HID 就绪门槛、2 秒判定窗口、
- *   IINDPM 偏移 100mA 编码、ICHG 60mA 步进取整、
- *   REG08 真实充电阶段、看门狗关闭、INT(P0.12) 立即刷新、
- *   REG09 双读清故障、REG0A 屏蔽 DPM 中断。
+ * 2026-11-21 修复记录（第五轮）：
+ *   拔线（无论是否充满）：memset 清零全部充电数据后广播，
+ *   UI 收到 is_charging=false + 全零数据，立即切回主屏。
+ *   充满未拔线：轮询照常、is_charging 保持 true，充电屏停留等拔线。
+ *   其余逻辑与第四轮一致：显示值每轮回读芯片寄存器（REG02/REG00）、
+ *   HID 就绪门槛、2 秒判定窗口、IINDPM 偏移 100mA 编码、
+ *   ICHG 60mA 步进取整、REG08 真实充电阶段、看门狗关闭、
+ *   INT(P0.12) 立即刷新、REG09 双读清故障、REG0A 屏蔽 DPM 中断。
  */
 
 #include <zephyr/kernel.h>
@@ -19,6 +17,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include <zmk/usb.h>
 #include <zmk/battery.h>
@@ -265,13 +264,14 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             k_work_reschedule(&poll_work, K_MSEC(OWLET_HID_REFRESH_DELAY_MS));
         }
     } else {
-        /* 真正拔线 */
+        /* 真正拔线（无论是否充满）：停止轮询，全部数据清零后广播，
+         * UI 收到后立即切回主屏 */
         powered = false;
         hid_refreshed = false;
         k_work_cancel_delayable(&poll_work);
         detected_iindpm = 0;
         detected_ichg = 0;
-        charger_ev.is_charging = false;
+        memset(&charger_ev, 0, sizeof(charger_ev));
         raise_owlet_charger_state_changed(charger_ev);
     }
     return ZMK_EV_EVENT_BUBBLE;
