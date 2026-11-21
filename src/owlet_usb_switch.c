@@ -3,9 +3,10 @@
  * 路径：src/owlet_usb_switch.c
  *
  * 2026-11-21 修复记录：
- *   放弃 k_timer（ISR上下文），回归 k_work_delayable。
- *   首次触发也通过 k_work_reschedule 调度，确保 workqueue 状态一致。
- *   真实数据读取（SOC、电压、电流、时长）全部恢复。
+ *   1. USB 插入后延迟 2 秒再执行首次轮询，等待 USB 枚举完成，
+ *      确保 zmk_usb_is_hid_ready() 能正确返回，避免误判为充电器。
+ *   2. 周期性调度由 k_work_reschedule 改为 k_work_schedule，
+ *      明确安排下一次执行，提高调度可靠性。
  */
 
 #include <zephyr/kernel.h>
@@ -125,7 +126,8 @@ static void poll_handler(struct k_work *work) {
 
     raise_owlet_charger_state_changed(charger_ev);
 
-    k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
+    /* 使用 k_work_schedule 明确安排下一次执行 */
+    k_work_schedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 }
 
 static int usb_switch_cb(const zmk_event_t *eh) {
@@ -136,7 +138,8 @@ static int usb_switch_cb(const zmk_event_t *eh) {
         charge_start_time = k_uptime_get();
         detected_iindpm = 0;
         detected_ichg = 0;
-        k_work_reschedule(&poll_work, K_NO_WAIT);
+        /* 延迟 2 秒，等待 USB 枚举完成，确保 zmk_usb_is_hid_ready() 正确 */
+        k_work_schedule(&poll_work, K_MSEC(2000));
     } else {
         k_work_cancel_delayable(&poll_work);
         charger_ev.is_charging = false;
