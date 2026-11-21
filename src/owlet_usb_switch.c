@@ -2,11 +2,10 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-21 修改记录：
- *   1. 移除硬编码的调试值，恢复真实数据读取（SOC、电压、电流、时长）。
- *   2. 保留 k_timer 周期性轮询机制。
- *   3. 保留 BQ25601 看门狗关闭逻辑。
- *   4. 事件结构体使用 static 变量，避免堆栈覆盖。
+ * 2026-11-21 修复记录：
+ *   放弃 k_timer（ISR上下文），回归 k_work_delayable。
+ *   首次触发也通过 k_work_reschedule 调度，确保 workqueue 状态一致。
+ *   真实数据读取（SOC、电压、电流、时长）全部恢复。
  */
 
 #include <zephyr/kernel.h>
@@ -26,10 +25,10 @@ LOG_MODULE_REGISTER(owlet_usb_switch, CONFIG_ZMK_LOG_LEVEL);
 ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 #define BQ25601_ADDR           CONFIG_OWLET_CHARGER_I2C_ADDR
-#define BQ25601_REG00          0x00 /* IINDPM */
-#define BQ25601_REG01          0x01 /* 控制寄存器，含 WD_RST */
-#define BQ25601_REG02          0x02 /* ICHG */
-#define BQ25601_REG05          0x05 /* WATCHDOG 配置 */
+#define BQ25601_REG00          0x00
+#define BQ25601_REG01          0x01
+#define BQ25601_REG02          0x02
+#define BQ25601_REG05          0x05
 
 #define REG00_IINDPM_MASK      0x1F
 #define REG02_ICHG_MASK        0x3F
@@ -39,7 +38,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
 
-static struct k_timer poll_timer;
+static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
 
 static uint16_t detected_iindpm = 0;
@@ -55,17 +54,12 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
     return i2c_reg_write_byte(i2c_dev, BQ25601_ADDR, reg, val);
 }
 
-/*
- * BQ25601 看门狗必须关闭，否则寄存器会被自动复位。
- */
 static void bq25601_disable_watchdog(void) {
     uint8_t val;
-    /* REG05[5:4] = 00 禁用看门狗 */
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
         val &= ~(BIT(5) | BIT(4));
         bq_write_reg(BQ25601_REG05, val);
     }
-    /* 写 WD_RST 位复位看门狗状态 */
     if (bq_read_reg(BQ25601_REG01, &val) == 0) {
         val |= BIT(6);
         bq_write_reg(BQ25601_REG01, val);
@@ -94,11 +88,10 @@ static uint16_t read_battery_voltage_mv(void) {
         return 0;
     }
     uint16_t raw = ((uint16_t)buf[0] << 8) | buf[1];
-    /* VCELL LSB = 78.125uV = 0.078125mV */
     return (uint16_t)((raw * 125) / 1600);
 }
 
-static void poll_timer_handler(struct k_timer *timer) {
+static void poll_handler(struct k_work *work) {
     bool is_pc = zmk_usb_is_hid_ready();
     uint8_t ui_vbus_stat;
     uint16_t target_iindpm, target_ichg;
@@ -131,6 +124,8 @@ static void poll_timer_handler(struct k_timer *timer) {
     charger_ev.charge_duration_s = (uint32_t)((k_uptime_get() - charge_start_time) / 1000);
 
     raise_owlet_charger_state_changed(charger_ev);
+
+    k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 }
 
 static int usb_switch_cb(const zmk_event_t *eh) {
@@ -141,9 +136,9 @@ static int usb_switch_cb(const zmk_event_t *eh) {
         charge_start_time = k_uptime_get();
         detected_iindpm = 0;
         detected_ichg = 0;
-        k_timer_start(&poll_timer, K_NO_WAIT, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
+        k_work_reschedule(&poll_work, K_NO_WAIT);
     } else {
-        k_timer_stop(&poll_timer);
+        k_work_cancel_delayable(&poll_work);
         charger_ev.is_charging = false;
         raise_owlet_charger_state_changed(charger_ev);
     }
@@ -161,7 +156,7 @@ static int owlet_usb_switch_init(void) {
 
     bq25601_disable_watchdog();
 
-    k_timer_init(&poll_timer, poll_timer_handler, NULL);
+    k_work_init_delayable(&poll_work, poll_handler);
     return 0;
 }
 SYS_INIT(owlet_usb_switch_init, APPLICATION, 80);
