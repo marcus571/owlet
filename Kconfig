@@ -7,6 +7,7 @@
 #   新增 BQ25601 电流配置项。
 # 2026-11-21 修改记录：
 #   新增 OWLET_CHARGER_DEFAULT_ICHG_MA，用于插入瞬间显示硬件默认的 500mA。
+#   新增 OWLET_CHARGER_INT_GPIO_PIN，BQ25601 INT 中断引脚（P0.12）。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -46,6 +47,10 @@ config OWLET_CHARGER_I2C_ADDR
 config OWLET_CHARGER_DEFAULT_ICHG_MA
 	int "硬件默认充电电流 (mA)，插入瞬间显示用"
 	default 500
+
+config OWLET_CHARGER_INT_GPIO_PIN
+	int "BQ25601 INT 引脚编号 (P0.x)"
+	default 12
 
 config OWLET_CHARGER_SDP_IINDPM_MA
 	int "标准电脑口 (SDP) 输入限流 (mA)"
