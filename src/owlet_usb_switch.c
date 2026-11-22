@@ -7,6 +7,11 @@
  *   完成后写 IINDPM 才生效。原代码只写一次且靠缓存不再重写，被源检测覆盖
  *   后永久卡 500mA。改为每轮读回校验、被改回即重写。
  *   DEBUG 时 IIN 显示重写前回读值，WD 显示清故障前真实模式位。
+ * 2026-11-22（IINDET_EN 握手）：补入 REG07 bit7 IINDET_EN=1 触发输入源检测，
+ *   分别在 init、每次重写 IINDPM 前、VBUS 插入时执行，确保 host 模式对
+ *   IINDPM 的覆盖有效（手册：host 模式需 IINDET_EN 触发后 IINDPM 才被
+ *   主机接管，PSEL 默认值才不再实时覆盖）。DEBUG 屏右栏第三行由
+ *   WD 改为显示 REG07 完整值，观察 IINDET_EN 是否自动回 0。
  */
 
 #include <zephyr/kernel.h>
@@ -41,6 +46,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 #define REG00_IINDPM_MASK      0x1F
 #define REG02_ICHG_MASK        0x3F
+#define REG07_IINDET_EN        BIT(7)
 
 #define MAX17048_ADDR          0x36
 #define MAX17048_REG_VCELL     0x02
@@ -48,6 +54,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define OWLET_FIRST_POLL_DELAY_MS  2000
 #define OWLET_HID_REFRESH_DELAY_MS 200
 #define OWLET_INT_REFRESH_DELAY_MS 100
+#define OWLET_INDET_SETTLE_MS      10
 
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_BUS(BQ25601_NODE));
 
@@ -84,6 +91,17 @@ static void bq25601_enter_host_mode(void) {
     }
 }
 
+/* 触发一次输入源检测：IINDET_EN=1，芯片跑完检测后自动回 0。
+ * 依据手册：host 模式下须靠 IINDET_EN 让芯片重新读 PSEL 并 update IINDPM，
+ * 之后主机对 REG00 IINDPM 的写入才能稳定生效，不被 PSEL 实时覆盖。 */
+static void bq25601_force_indet(void) {
+    uint8_t val;
+    if (bq_read_reg(BQ25601_REG07, &val) == 0) {
+        bq_write_reg(BQ25601_REG07, val | REG07_IINDET_EN);
+        k_msleep(OWLET_INDET_SETTLE_MS);
+    }
+}
+
 static void bq25601_init_regs(void) {
     uint8_t val;
     bq25601_enter_host_mode();
@@ -91,6 +109,7 @@ static void bq25601_init_regs(void) {
         val |= BIT(1) | BIT(0);
         bq_write_reg(BQ25601_REG0A, val);
     }
+    bq25601_force_indet();
 }
 
 static uint16_t ichg_round_to_step(uint16_t ma) {
@@ -103,6 +122,9 @@ static uint16_t ichg_round_to_step(uint16_t ma) {
 
 static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     uint16_t code;
+
+    /* 写 IINDPM 前再强制一次源检测，避免上轮被 PSEL 回写后本次重写仍无效 */
+    bq25601_force_indet();
 
     code = (iindpm > 100) ? ((iindpm - 100) / 100) : 0;
     if (code > 31) {
@@ -232,6 +254,7 @@ static void poll_handler(struct k_work *work) {
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+    bq_read_reg(BQ25601_REG07, &charger_ev.dbg_reg07);
     bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
     bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
 #endif
@@ -253,6 +276,15 @@ static void publish_initial_state(void) {
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = 0;
 
+#if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
+    bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
+    bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+    bq_read_reg(BQ25601_REG07, &charger_ev.dbg_reg07);
+    bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
+    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
+    bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
+#endif
+
     raise_owlet_charger_state_changed(charger_ev);
 }
 
@@ -267,6 +299,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             charge_start_time = k_uptime_get();
 
             bq25601_enter_host_mode();
+            bq25601_force_indet();
 
             publish_initial_state();
             k_work_reschedule(&poll_work, K_MSEC(OWLET_FIRST_POLL_DELAY_MS));
