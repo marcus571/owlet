@@ -1,8 +1,7 @@
-// boards/shields/nice_view_gem/widgets/screen_charge.c
+// boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-21 修改记录：
-//   电压行字段名定为 VBAT，保留 V 单位后缀，去掉调试计数器。
-//   "VBAT:3.91V" 共 10 字符，与已验证可单行显示的 "Volt:3.91V" 等宽。
+// 2026-11-21：电压行 VBAT 保留 V 后缀，去调试计数器。
+// 2026-11-22：Chg 行追加热调节标志 T（therm_stat=1 时显示 "Chg:FST T"）。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -50,7 +49,7 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "Type:%s", type_str);
     lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    // 2. 设定的充电电流 (使用 ichg_ma)
+    // 2. 设定的充电电流
     char cur_str[16];
     format_current(cur_str, sizeof(cur_str), state->ichg_ma);
     snprintf(text, sizeof(text), "Set:%s", cur_str);
@@ -68,7 +67,7 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "SOC:%u%%", state->battery_soc);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
-    // 2. 充电状态
+    // 2. 充电状态（末尾 T = 芯片热调节降流中）
     const char *chrg_str = "IDLE";
     if (state->chrg_stat == 1) {
         chrg_str = "PRE";
@@ -77,7 +76,11 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     } else if (state->chrg_stat == 3) {
         chrg_str = "FULL";
     }
-    snprintf(text, sizeof(text), "Chg:%s", chrg_str);
+    if (state->therm_stat) {
+        snprintf(text, sizeof(text), "Chg:%s T", chrg_str);
+    } else {
+        snprintf(text, sizeof(text), "Chg:%s", chrg_str);
+    }
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
     // 3. 电池电压
