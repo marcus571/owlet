@@ -28,6 +28,7 @@ config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
     imply OWLET_VIEW_WIDGET_STATUS
 
 config OWLET_VIEW_WIDGET_STATUS
+    bool "Owlet view status widget"
     select LV_USE_LABEL
     select LV_USE_IMG
     select LV_USE_CANVAS
