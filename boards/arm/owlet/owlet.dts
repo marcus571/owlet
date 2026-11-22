@@ -3,12 +3,8 @@
  * owlet 板级设备树（主控小板 + 电源小板，所有键盘共享的不变量）
  * 路径：boards/arm/owlet/owlet.dts
  *
- * 2026-11-22 板/shield 拆分（2A）：
- *   键矩阵/编码器/锁定灯/RGB(SPI3)/屏幕总线(SPI1)/keymap 及对应 chosen
- *   全部移入键盘 shield（boards/shields/owlet_0）。
- *   本板保留：SoC/flash/DCDC/USB、I2C0 + MAX17048 + BQ25601、
- *   TPS63802 使能(P0.13)、蓝牙指示灯(P0.15)。
- *   I2C pinctrl 保留 pro 现行引脚作默认，其它键盘在 shield overlay 覆盖。
+ * 2026-11-22 板/shield 拆分（2A）：键盘差异层移入 boards/shields/owlet_0。
+ * 2026-11-22（2B）：bq25601 增加 int-gpios 默认 P0.12，键盘 shield 可覆盖到任意脚。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -74,6 +70,7 @@
 		compatible = "ti,bq25601";
 		reg = <0x6b>;
 		status = "okay";
+		int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
 	};
 };
 
