@@ -1,0 +1,19 @@
+# Owlet 自定义 binding：BQ25601 充电管理芯片（I2C）
+# 驱动见 src/owlet_usb_switch.c，由 CONFIG_OWLET_USB_CHARGER_SWITCH 使能。
+# Zephyr 上游无此 compatible 的 binding，本文件为唯一来源。
+description: |
+  TI BQ25601 单节锂电池充电管理芯片。Owlet 电源小板固定使用，
+  I2C 地址 0x6B。驱动通过寄存器读写完成接口识别、电流配置与状态上报。
+
+compatible: "ti,bq25601"
+
+include: i2c-device.yaml
+
+properties:
+  int-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      BQ25601 INT 引脚（开漏、低有效、256us 脉冲）。可选属性：
+      声明后驱动启用 INT 即时刷新（充电完成/故障/电源变化）；
+      不声明则退回纯周期轮询。支持任意 GPIO 端口（P0/P1）。
