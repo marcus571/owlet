@@ -2,9 +2,11 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-22（干净测试版）：移除实验性的每轮 WD_RST/强写（会自激振荡）。
- *   改为初始化与插电时各稳健进一次 host 模式（WD_RST=1+关看门狗），
- *   之后仅被动回读。DEBUG 开启时屏幕显示真实寄存器供判读。
+ * 2026-11-22（定位实验）：
+ *   1. configure_charger 改为直接写 REG00/REG02（不依赖读-改-写），
+ *      排除"REG00 读失败导致 IINDPM 写入被跳过"。
+ *   2. DEBUG 时轮询开头先读 REG09（清故障前）取真实 WATCHDOG_FAULT 位，
+ *      1=default 模式 / 0=host 模式，判定 PSEL 是否实时覆盖 IINDPM。
  */
 
 #include <zephyr/kernel.h>
@@ -73,15 +75,14 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
     return i2c_reg_write_byte(i2c_dev, BQ25601_ADDR, reg, val);
 }
 
-/* 稳健进入 host 模式：WD_RST=1 转入 + 关看门狗保持。初始化与插电各调一次。 */
 static void bq25601_enter_host_mode(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG01, &val) == 0) {
-        bq_write_reg(BQ25601_REG01, val | BIT(6)); /* WD_RST=1 */
+        bq_write_reg(BQ25601_REG01, val | BIT(6));
         k_msleep(10);
     }
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
-        val &= ~(BIT(5) | BIT(4)); /* WATCHDOG=00 */
+        val &= ~(BIT(5) | BIT(4));
         bq_write_reg(BQ25601_REG05, val);
     }
 }
@@ -90,7 +91,7 @@ static void bq25601_init_regs(void) {
     uint8_t val;
     bq25601_enter_host_mode();
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
-        val |= BIT(1) | BIT(0); /* 屏蔽 DPM 中断 */
+        val |= BIT(1) | BIT(0);
         bq_write_reg(BQ25601_REG0A, val);
     }
 }
@@ -103,24 +104,22 @@ static uint16_t ichg_round_to_step(uint16_t ma) {
     return code * 60;
 }
 
+/* 直接写（不依赖读-改-写）：REG00 高3位 EN_HIZ/EN_ICHG_MON 写0为安全默认；
+ * REG02 高2位 BOOST_LIM/Q1_FULLON 写0（不使用 OTG boost，无影响）。 */
 static void configure_charger(uint16_t iindpm, uint16_t ichg) {
-    uint8_t val;
     uint16_t code;
 
-    if (bq_read_reg(BQ25601_REG00, &val) == 0) {
-        code = (iindpm > 100) ? ((iindpm - 100) / 100) : 0;
-        if (code > 31) {
-            code = 31;
-        }
-        bq_write_reg(BQ25601_REG00, (val & ~REG00_IINDPM_MASK) | code);
+    code = (iindpm > 100) ? ((iindpm - 100) / 100) : 0;
+    if (code > 31) {
+        code = 31;
     }
-    if (bq_read_reg(BQ25601_REG02, &val) == 0) {
-        code = ichg / 60;
-        if (code > 50) {
-            code = 50;
-        }
-        bq_write_reg(BQ25601_REG02, (val & ~REG02_ICHG_MASK) | code);
+    bq_write_reg(BQ25601_REG00, (uint8_t)code);
+
+    code = ichg / 60;
+    if (code > 50) {
+        code = 50;
     }
+    bq_write_reg(BQ25601_REG02, (uint8_t)code);
 }
 
 static uint16_t read_ichg_actual_ma(void) {
@@ -183,6 +182,11 @@ static void poll_handler(struct k_work *work) {
 
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 
+#if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
+    /* 清故障前先读 REG09，取真实模式位（bit7: 1=default, 0=host） */
+    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
+#endif
+
     bq25601_clear_faults();
 
     int64_t elapsed_ms = k_uptime_get() - charge_start_time;
@@ -227,11 +231,10 @@ static void poll_handler(struct k_work *work) {
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    /* 被动回读，不做任何写入/复位 */
+    /* 被动回读（dbg_reg09 已在开头取清故障前的值，此处不再覆盖） */
     bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
     bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
-    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
     bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
 #endif
 
@@ -267,7 +270,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             detected_iindpm = 0;
             detected_ichg = 0;
 
-            /* 插电时稳健重进 host 模式，确保 IINDPM 写入不被 PSEL 覆盖 */
             bq25601_enter_host_mode();
 
             publish_initial_state();
