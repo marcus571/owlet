@@ -2,15 +2,12 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-21 修复记录（第五轮）：拔线清零立即回主屏；充满未拔线停留；
- *   显示值每轮回读芯片寄存器；HID 就绪门槛；2 秒判定窗口；
- *   IINDPM 偏移 100mA 编码；ICHG 60mA 步进取整；REG08 真实充电阶段；
- *   看门狗关闭；REG09 双读清故障；REG0A 屏蔽 DPM 中断。
- * 2026-11-22（2B 模块化）：
- *   1. INT 引脚由 Kconfig 整数改为设备树 int-gpios 属性（可选），
- *      支持 P0/P1 任意脚；未声明时退回纯周期轮询。
- *   2. I2C 总线改为从 bq25601 节点的父总线取得（DT_BUS），
- *      未来键盘换 TWIM 实例时驱动自动跟随。
+ * 2026-11-21（第五轮）：拔线清零立即回主屏；充满未拔线停留；显示值每轮
+ *   回读芯片寄存器；HID 就绪门槛；2 秒判定窗口；IINDPM 偏移 100mA 编码；
+ *   ICHG 60mA 步进取整；REG08 真实充电阶段；看门狗关闭；REG09 双读清故障；
+ *   REG0A 屏蔽 DPM 中断。
+ * 2026-11-22（2B）：INT 改设备树 int-gpios 可选（P0/P1）；I2C 总线跟随节点。
+ * 2026-11-22（提速）：新增 therm_stat（REG08[1]）上报，供充电屏热标志。
  */
 
 #include <zephyr/kernel.h>
@@ -46,17 +43,12 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define MAX17048_ADDR          0x36
 #define MAX17048_REG_VCELL     0x02
 
-/* 插入后的接口类型判定窗口：窗口内未枚举则保持 UNK 显示 */
 #define OWLET_FIRST_POLL_DELAY_MS  2000
-/* HID 枚举完成后的快速刷新延迟 */
 #define OWLET_HID_REFRESH_DELAY_MS 200
-/* INT 脉冲后的快速刷新延迟（兼作去抖） */
 #define OWLET_INT_REFRESH_DELAY_MS 100
 
-/* I2C 总线跟随 bq25601 节点所在父总线 */
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_BUS(BQ25601_NODE));
 
-/* INT 引脚：设备树 int-gpios 可选属性 */
 #if DT_NODE_HAS_PROP(BQ25601_NODE, int_gpios)
 #define OWLET_HAS_CHARGER_INT 1
 static const struct gpio_dt_spec charger_int = GPIO_DT_SPEC_GET(BQ25601_NODE, int_gpios);
@@ -81,7 +73,6 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
     return i2c_reg_write_byte(i2c_dev, BQ25601_ADDR, reg, val);
 }
 
-/* 关看门狗 + 屏蔽 DPM 中断（REG0A 高 6 位为只读状态，写回无副作用） */
 static void bq25601_init_regs(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
@@ -94,7 +85,6 @@ static void bq25601_init_regs(void) {
     }
 }
 
-/* ICHG 设定值就近取整到 60mA 步进（0-3000mA） */
 static uint16_t ichg_round_to_step(uint16_t ma) {
     uint16_t code = (ma + 30) / 60;
     if (code > 50) {
@@ -108,7 +98,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     uint16_t code;
 
     if (bq_read_reg(BQ25601_REG00, &val) == 0) {
-        /* IINDPM：偏移 100mA，步进 100mA，范围 100mA-3.2A */
         code = (iindpm > 100) ? ((iindpm - 100) / 100) : 0;
         if (code > 31) {
             code = 31;
@@ -116,7 +105,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
         bq_write_reg(BQ25601_REG00, (val & ~REG00_IINDPM_MASK) | code);
     }
     if (bq_read_reg(BQ25601_REG02, &val) == 0) {
-        /* ICHG：偏移 0，步进 60mA，范围 0-3000mA */
         code = ichg / 60;
         if (code > 50) {
             code = 50;
@@ -125,7 +113,6 @@ static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     }
 }
 
-/* 回读芯片内实际的 ICHG 设定值 */
 static uint16_t read_ichg_actual_ma(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG02, &val) == 0) {
@@ -134,7 +121,6 @@ static uint16_t read_ichg_actual_ma(void) {
     return 0;
 }
 
-/* 回读芯片内实际的输入限流（UNK 阶段的实际约束，PSEL=高默认 500mA） */
 static uint16_t read_iindpm_actual_ma(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG00, &val) == 0) {
@@ -152,7 +138,15 @@ static uint8_t read_chrg_stat(void) {
     return 0;
 }
 
-/* 双读 REG09：第一次清锁存故障，第二次取当前故障，恢复后续 INT 能力 */
+/* REG08[1] THERM_STAT：1=芯片处于热调节（自动降流） */
+static uint8_t read_therm_stat(void) {
+    uint8_t val;
+    if (bq_read_reg(BQ25601_REG08, &val) == 0) {
+        return (val >> 1) & 0x01;
+    }
+    return 0;
+}
+
 static void bq25601_clear_faults(void) {
     uint8_t val;
     bq_read_reg(BQ25601_REG09, &val);
@@ -179,7 +173,6 @@ static uint8_t read_battery_soc(void) {
 static void poll_handler(struct k_work *work) {
     ARG_UNUSED(work);
 
-    /* 先排下一轮，任何单次异常都不会断掉周期刷新 */
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 
     bq25601_clear_faults();
@@ -187,7 +180,6 @@ static void poll_handler(struct k_work *work) {
     int64_t elapsed_ms = k_uptime_get() - charge_start_time;
     bool is_pc = zmk_usb_is_hid_ready();
 
-    /* 判定窗口内未枚举成功：保持 UNK，不写芯片配置 */
     if (is_pc || elapsed_ms >= OWLET_FIRST_POLL_DELAY_MS) {
         uint8_t ui_vbus_stat;
         uint16_t target_iindpm, target_ichg;
@@ -208,12 +200,10 @@ static void poll_handler(struct k_work *work) {
             detected_ichg = target_ichg;
         }
 
-        /* 铁律：每轮回读 REG02，显示芯片内真实设定值 */
         uint16_t actual_ichg = read_ichg_actual_ma();
         charger_ev.vbus_stat = ui_vbus_stat;
         charger_ev.ichg_ma = (actual_ichg != 0) ? actual_ichg : target_ichg;
     } else {
-        /* UNK 阶段：回读芯片实际输入限流，回读失败才用配置默认值 */
         uint16_t actual_iindpm = read_iindpm_actual_ma();
         charger_ev.vbus_stat = 0;
         charger_ev.ichg_ma = (actual_iindpm != 0)
@@ -223,6 +213,7 @@ static void poll_handler(struct k_work *work) {
 
     charger_ev.is_charging = true;
     charger_ev.chrg_stat = read_chrg_stat();
+    charger_ev.therm_stat = read_therm_stat();
     charger_ev.battery_soc = read_battery_soc();
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
@@ -230,13 +221,13 @@ static void poll_handler(struct k_work *work) {
     raise_owlet_charger_state_changed(charger_ev);
 }
 
-/* 插入瞬间的初始状态：接口类型未知，电流回读芯片实际限流 */
 static void publish_initial_state(void) {
     uint16_t actual_iindpm = read_iindpm_actual_ma();
 
     charger_ev.is_charging = true;
     charger_ev.vbus_stat = 0;
     charger_ev.chrg_stat = read_chrg_stat();
+    charger_ev.therm_stat = read_therm_stat();
     charger_ev.ichg_ma = (actual_iindpm != 0)
                              ? actual_iindpm
                              : CONFIG_OWLET_CHARGER_DEFAULT_ICHG_MA;
@@ -251,7 +242,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
 
-    /* 只要不是 NONE 就代表 VBUS 在位（POWERED 或 HID 都在充电） */
     if (ev->conn_state != ZMK_USB_CONN_NONE) {
         if (!powered) {
             powered = true;
@@ -264,13 +254,11 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             k_work_reschedule(&poll_work, K_MSEC(OWLET_FIRST_POLL_DELAY_MS));
         }
 
-        /* 只有真正枚举为 HID 设备才快速刷新 */
         if (!hid_refreshed && zmk_usb_is_hid_ready()) {
             hid_refreshed = true;
             k_work_reschedule(&poll_work, K_MSEC(OWLET_HID_REFRESH_DELAY_MS));
         }
     } else {
-        /* 真正拔线（无论是否充满）：停止轮询，全部数据清零后广播 */
         powered = false;
         hid_refreshed = false;
         k_work_cancel_delayable(&poll_work);
@@ -286,9 +274,6 @@ ZMK_LISTENER(owlet_usb_switch, usb_switch_cb);
 ZMK_SUBSCRIPTION(owlet_usb_switch, zmk_usb_conn_state_changed);
 
 #if OWLET_HAS_CHARGER_INT
-/* BQ25601 INT：开漏低有效 256us 脉冲。
- * 触发源：输入源识别 / 电源接入与移除 / 充电完成 / 故障（DPM 已屏蔽）。
- * ISR 中仅安排一次快速刷新，I2C 读取在工作队列中完成。 */
 static void charger_int_isr(const struct device *dev, struct gpio_callback *cb,
                             uint32_t pins) {
     ARG_UNUSED(dev);
