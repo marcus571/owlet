@@ -5,7 +5,7 @@ type: board
 arch: arm
 outputs:
   - uf2
-url: https://github.com/yourusername/owlet-zmk-config
+url: https://github.com/marcus571/owlet
 description: Owlet Custom Keyboard
 requires: []
 features:
