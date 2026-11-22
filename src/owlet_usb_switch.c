@@ -2,11 +2,11 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-22（定位实验）：
- *   1. configure_charger 改为直接写 REG00/REG02（不依赖读-改-写），
- *      排除"REG00 读失败导致 IINDPM 写入被跳过"。
- *   2. DEBUG 时轮询开头先读 REG09（清故障前）取真实 WATCHDOG_FAULT 位，
- *      1=default 模式 / 0=host 模式，判定 PSEL 是否实时覆盖 IINDPM。
+ * 2026-11-22（根因修复）：手册 REG00 注明——每次插入电源芯片自动跑输入源
+ *   检测，完成后按 PSEL 自动改写 IINDPM（PSEL=高→500mA），主机须在检测
+ *   完成后写 IINDPM 才生效。原代码只写一次且靠缓存不再重写，被源检测覆盖
+ *   后永久卡 500mA。改为每轮读回校验、被改回即重写。
+ *   DEBUG 时 IIN 显示重写前回读值，WD 显示清故障前真实模式位。
  */
 
 #include <zephyr/kernel.h>
@@ -62,9 +62,6 @@ static int64_t charge_start_time;
 static bool powered;
 static bool hid_refreshed;
 
-static uint16_t detected_iindpm = 0;
-static uint16_t detected_ichg = 0;
-
 static struct owlet_charger_state_changed charger_ev;
 
 static int bq_read_reg(uint8_t reg, uint8_t *val) {
@@ -104,8 +101,6 @@ static uint16_t ichg_round_to_step(uint16_t ma) {
     return code * 60;
 }
 
-/* 直接写（不依赖读-改-写）：REG00 高3位 EN_HIZ/EN_ICHG_MON 写0为安全默认；
- * REG02 高2位 BOOST_LIM/Q1_FULLON 写0（不使用 OTG boost，无影响）。 */
 static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     uint16_t code;
 
@@ -183,8 +178,7 @@ static void poll_handler(struct k_work *work) {
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    /* 清故障前先读 REG09，取真实模式位（bit7: 1=default, 0=host） */
-    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
+    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09); /* 清故障前真实模式位 */
 #endif
 
     bq25601_clear_faults();
@@ -206,15 +200,21 @@ static void poll_handler(struct k_work *work) {
             target_ichg = ichg_round_to_step(CONFIG_OWLET_CHARGER_DCP_ICHG_MA);
         }
 
-        if (target_iindpm != detected_iindpm || target_ichg != detected_ichg) {
+        /* 每轮读回校验：源检测可能把 IINDPM 改回 PSEL 默认，发现不符即重写 */
+        uint8_t reg00_now = 0;
+        bq_read_reg(BQ25601_REG00, &reg00_now);
+#if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
+        charger_ev.dbg_reg00 = reg00_now; /* 重写前的真实回读值 */
+#endif
+        uint16_t cur_iindpm = (uint16_t)((reg00_now & REG00_IINDPM_MASK) + 1) * 100;
+        uint16_t cur_ichg = read_ichg_actual_ma();
+
+        if (cur_iindpm != target_iindpm || cur_ichg != target_ichg) {
             configure_charger(target_iindpm, target_ichg);
-            detected_iindpm = target_iindpm;
-            detected_ichg = target_ichg;
         }
 
-        uint16_t actual_ichg = read_ichg_actual_ma();
         charger_ev.vbus_stat = ui_vbus_stat;
-        charger_ev.ichg_ma = (actual_ichg != 0) ? actual_ichg : target_ichg;
+        charger_ev.ichg_ma = (cur_ichg != 0) ? cur_ichg : target_ichg;
     } else {
         uint16_t actual_iindpm = read_iindpm_actual_ma();
         charger_ev.vbus_stat = 0;
@@ -231,8 +231,6 @@ static void poll_handler(struct k_work *work) {
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    /* 被动回读（dbg_reg09 已在开头取清故障前的值，此处不再覆盖） */
-    bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
     bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
     bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
@@ -267,8 +265,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             powered = true;
             hid_refreshed = false;
             charge_start_time = k_uptime_get();
-            detected_iindpm = 0;
-            detected_ichg = 0;
 
             bq25601_enter_host_mode();
 
@@ -284,8 +280,6 @@ static int usb_switch_cb(const zmk_event_t *eh) {
         powered = false;
         hid_refreshed = false;
         k_work_cancel_delayable(&poll_work);
-        detected_iindpm = 0;
-        detected_ichg = 0;
         memset(&charger_ev, 0, sizeof(charger_ev));
         raise_owlet_charger_state_changed(charger_ev);
     }
