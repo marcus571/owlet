@@ -1,10 +1,10 @@
 # ============================================================
-# owlet 板默认配置文件
+# owlet 板默认配置文件（主控 + 电源小板的基础能力）
 # 路径：boards/arm/owlet/owlet_defconfig
 #
-# 2026-11-19 修改记录：
-#   移除 BQ25601D 相关残留（无）。
-#   保持日志关闭、CDC ACM 关闭。
+# 2026-11-22（2B）：EC11/WS2812/锁定灯/HID指示灯/显示 等外设配置
+#   迁入对应键盘 shield(owlet_0.conf) 与显示 shield(owlet_view.conf)，
+#   板级只保留所有键盘共享的基础项，lite 版不选即不带。
 # ============================================================
 
 # SoC
@@ -44,22 +44,6 @@ CONFIG_ZMK_EXT_POWER=y
 
 # 电池燃料计
 CONFIG_ZMK_MAX17048=y
-
-# LED 指示灯底层
-CONFIG_LED=y
-CONFIG_LED_GPIO=y
-CONFIG_ZMK_HID_INDICATORS=y
-
-# EC11 编码器
-CONFIG_EC11=y
-CONFIG_EC11_TRIGGER_GLOBAL_THREAD=y
-
-# WS2812B RGB 灯带底层
-CONFIG_WS2812_STRIP=y
-
-# nice!view 显示底层
-CONFIG_ZMK_DISPLAY=y
-CONFIG_LS0XX=y
 
 # DC/DC 电源模式
 CONFIG_BOARD_ENABLE_DCDC=y
