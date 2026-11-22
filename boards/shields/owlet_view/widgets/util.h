@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/widgets/util.h
+// boards/shields/owlet_view/widgets/util.h
 #pragma once
 
 #include <lvgl.h>
@@ -9,9 +9,9 @@
 #define SCREEN_CANVAS_H 68
 
 #define LVGL_BACKGROUND                                                                            \
-    IS_ENABLED(CONFIG_NICE_VIEW_WIDGET_INVERTED) ? lv_color_black() : lv_color_white()
+    IS_ENABLED(CONFIG_OWLET_VIEW_WIDGET_INVERTED) ? lv_color_black() : lv_color_white()
 #define LVGL_FOREGROUND                                                                            \
-    IS_ENABLED(CONFIG_NICE_VIEW_WIDGET_INVERTED) ? lv_color_white() : lv_color_black()
+    IS_ENABLED(CONFIG_OWLET_VIEW_WIDGET_INVERTED) ? lv_color_white() : lv_color_black()
 
 struct status_state {
     uint8_t battery;
