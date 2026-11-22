@@ -2,9 +2,10 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-22（过压修复）：09=10/0A 的 ACOV 证实为输入过压尖峰反复挂起充电。
- *   1. REG06 OVP 阈值 6.5V→10.5V（输入恒为 5V，10.5V 仍有保护）。
- *   2. 重同步限流为每 60s 最多一次，避免 INT 驱动的电流阶跃制造过压尖峰。
+ * 2026-11-22（WD_RST 时机验证）：怀疑 WD_RST 只在"无 VBUS/上电瞬间"写过，
+ *   芯片未真正进入 host 模式，导致 PSEL 在 default 模式下压住 IINDPM。
+ *   本版把 WD_RST 挪到首次轮询（VBUS 稳定后）执行，并在 WD_RST 后立刻回读
+ *   ICHG：读到 2040 说明寄存器被复位=WD_RST 生效，否则=未生效。
  */
 
 #include <zephyr/kernel.h>
@@ -44,7 +45,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 #define OWLET_INDET_POLL_MS    5
 #define OWLET_INDET_MAX_POLLS  100
-#define OWLET_RESYNC_MIN_MS    60000   /* 重同步最小间隔，抑制电流阶跃 */
+#define OWLET_RESYNC_MIN_MS    60000
 
 #define MAX17048_ADDR          0x36
 #define MAX17048_REG_VCELL     0x02
@@ -66,8 +67,12 @@ static int64_t charge_start_time;
 static int64_t last_resync_uptime;
 static bool powered;
 static bool hid_refreshed;
+static uint16_t last_rst_ichg;
 
 static struct owlet_charger_state_changed charger_ev;
+
+/* 前向声明 */
+static uint16_t read_ichg_actual_ma(void);
 
 static int bq_read_reg(uint8_t reg, uint8_t *val) {
     return i2c_reg_read_byte(i2c_dev, BQ25601_ADDR, reg, val);
@@ -77,11 +82,14 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
     return i2c_reg_write_byte(i2c_dev, BQ25601_ADDR, reg, val);
 }
 
+/* 进入 host 模式并验证：WD_RST=1 会复位可复位寄存器（ICHG→2040），
+ * 随即回读 ICHG 存 last_rst_ichg，供诊断判断 WD_RST 是否真生效。 */
 static void bq25601_enter_host_mode(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG01, &val) == 0) {
-        bq_write_reg(BQ25601_REG01, val | BIT(6));
+        bq_write_reg(BQ25601_REG01, (uint8_t)(val | BIT(6)));
         k_msleep(10);
+        last_rst_ichg = read_ichg_actual_ma();
     }
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
         val &= ~(BIT(5) | BIT(4));
@@ -89,11 +97,10 @@ static void bq25601_enter_host_mode(void) {
     }
 }
 
-/* OVP 阈值抬到 10.5V（REG06[7:6]=10），放过 5V 线上的瞬态尖峰 */
 static void bq25601_set_ovp_10v5(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG06, &val) == 0) {
-        val = (uint8_t)((val & 0x3F) | 0x80); /* bit7=1,bit6=0 → OVP=10 (10.5V) */
+        val = (uint8_t)((val & 0x3F) | 0x80);
         bq_write_reg(BQ25601_REG06, val);
     }
 }
@@ -126,7 +133,6 @@ static void bq25601_detect_and_wait(void) {
 
 static void bq25601_init_regs(void) {
     uint8_t val;
-    bq25601_enter_host_mode();
     bq25601_set_ovp_10v5();
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
         val |= BIT(1) | BIT(0);
@@ -251,9 +257,10 @@ static void poll_handler(struct k_work *work) {
         uint16_t cur_iindpm = (uint16_t)((reg00_now & REG00_IINDPM_MASK) + 1) * 100;
         uint16_t cur_ichg = read_ichg_actual_ma();
 
-        /* 重同步限流：每 60s 最多一次，避免高频电流阶跃诱发过压尖峰 */
+        /* 仅在漂移且距上次 ≥60s 时重同步；且在 VBUS 稳定后先做 WD_RST */
         if ((cur_iindpm != target_iindpm || cur_ichg != target_ichg) &&
             (k_uptime_get() - last_resync_uptime) >= OWLET_RESYNC_MIN_MS) {
+            bq25601_enter_host_mode();     /* VBUS 稳定后进 host 模式并验证 */
             configure_charger(target_iindpm, target_ichg);
             last_resync_uptime = k_uptime_get();
             cur_ichg = read_ichg_actual_ma();
@@ -275,6 +282,7 @@ static void poll_handler(struct k_work *work) {
     charger_ev.battery_soc = read_battery_soc();
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
+    charger_ev.dbg_rst_ichg = last_rst_ichg;
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
@@ -300,6 +308,7 @@ static void publish_initial_state(void) {
     charger_ev.battery_soc = read_battery_soc();
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = 0;
+    charger_ev.dbg_rst_ichg = last_rst_ichg;
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
     bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
@@ -323,9 +332,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             powered = true;
             hid_refreshed = false;
             charge_start_time = k_uptime_get();
-            last_resync_uptime = 0; /* 允许插电后立即首次重同步 */
-
-            bq25601_enter_host_mode();
+            last_resync_uptime = 0;
 
             publish_initial_state();
             k_work_reschedule(&poll_work, K_MSEC(OWLET_FIRST_POLL_DELAY_MS));
@@ -338,6 +345,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
     } else {
         powered = false;
         hid_refreshed = false;
+        last_resync_uptime = 0;
         k_work_cancel_delayable(&poll_work);
         memset(&charger_ev, 0, sizeof(charger_ev));
         raise_owlet_charger_state_changed(charger_ev);
