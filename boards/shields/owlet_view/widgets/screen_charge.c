@@ -1,6 +1,6 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-22：新增 CONFIG_OWLET_CHARGER_DEBUG 诊断布局，显示芯片真实寄存器。
+// 2026-11-22：诊断布局改为 IIN/PN/07/01/0A/08，定位 IINDPM 钳流根因。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -34,24 +34,24 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     lv_canvas_draw_rect(canvas, 80, 4, 1, 61, &line_dsc);
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    /* 诊断布局：左 IIN/WD/0A，右 08/ICH/05 */
+    /* 诊断布局：左 IIN/PN/07，右 01/0A/08 */
     uint16_t iin = (uint16_t)((state->dbg_reg00 & 0x1F) + 1) * 100;
     snprintf(text, sizeof(text), "IIN:%u", iin);
     lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "WD:%u", (state->dbg_reg09 >> 7) & 1);
+    snprintf(text, sizeof(text), "PN:%u", (state->dbg_reg0b >> 3) & 0x0F);
     lv_canvas_draw_text(canvas, 4, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
+    snprintf(text, sizeof(text), "07:%02X", state->dbg_reg07);
     lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
+    snprintf(text, sizeof(text), "01:%02X", state->dbg_reg01);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "ICH:%u", state->ichg_ma);
+    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
+    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
     lv_canvas_draw_text(canvas, 84, 48, 76, &label_dsc, text);
     return;
 #endif
