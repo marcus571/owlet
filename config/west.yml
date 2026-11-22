@@ -2,17 +2,12 @@ manifest:
   remotes:
     - name: zmkfirmware
       url-base: https://github.com/zmkfirmware
-    - name: marcus571
-      url-base: https://github.com/marcus571
 
   projects:
     - name: zmk
       remote: zmkfirmware
       revision: v0.3.0
       import: app/west.yml
-    - name: owlet-view-pro  # 修改：拉取的新 UI 仓库名称
-      remote: marcus571
-      revision: main
 
   self:
     path: config
