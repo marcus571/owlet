@@ -1,5 +1,5 @@
 include:
   - board: owlet
-    shield: owlet_view
+    shield: owlet_0 owlet_view
     artifact-name: owlet-zmk
     cmake_args: ""
