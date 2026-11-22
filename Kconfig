@@ -2,8 +2,9 @@
 # 仓库根目录的 Kconfig
 # 路径：Kconfig
 #
-# 2026-11-22（2B）：移除 OWLET_CHARGER_INT_GPIO_PIN，
-#   INT 引脚改由设备树 bq25601 节点的 int-gpios 属性定义（可选）。
+# 2026-11-22：OWLET_BLE_LED_POLL_MS 默认 500→1000（省电微优化，
+#   蓝牙灯为板级定死件，此默认值服务所有键盘）。
+#   INT 引脚配置项已移除（改设备树 int-gpios）。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -13,7 +14,7 @@ config OWLET_BLE_LED
 if OWLET_BLE_LED
 config OWLET_BLE_LED_POLL_MS
 	int "已连接时复查连接状态的周期（毫秒）"
-	default 500
+	default 1000
 
 config OWLET_BLE_LED_BLINK_ON_MS
 	int "未连接时每次点亮的时长（毫秒）"
