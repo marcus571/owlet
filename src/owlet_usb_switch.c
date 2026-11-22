@@ -8,6 +8,11 @@
  *   REG0A 屏蔽 DPM 中断。
  * 2026-11-22（2B）：INT 改设备树 int-gpios 可选（P0/P1）；I2C 总线跟随节点。
  * 2026-11-22（提速）：新增 therm_stat（REG08[1]）上报，供充电屏热标志。
+ * 2026-11-22（host 模式修复）：恢复 WD_RST=1 进入 host 模式。
+ *   BQ25601 无 ILIM 引脚，输入限流由 IINDPM 寄存器决定，但 default 模式下
+ *   PSEL 引脚会实时覆盖 IINDPM（PSEL=高→钳死 500mA）。必须写 WD_RST=1 转入
+ *   host 模式、再关看门狗保持，IINDPM 写入才能生效。此前误删该脉冲导致
+ *   充电电流被钳在 500mA。
  */
 
 #include <zephyr/kernel.h>
@@ -31,6 +36,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601_NODE           DT_NODELABEL(bq25601)
 #define BQ25601_ADDR           CONFIG_OWLET_CHARGER_I2C_ADDR
 #define BQ25601_REG00          0x00
+#define BQ25601_REG01          0x01
 #define BQ25601_REG02          0x02
 #define BQ25601_REG05          0x05
 #define BQ25601_REG08          0x08
@@ -75,12 +81,25 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
 
 static void bq25601_init_regs(void) {
     uint8_t val;
+
+    /* 第一步：写 WD_RST=1 进入 host 模式（BQ25601 的唯一入口）。
+     * 该操作会把"看门狗可复位"寄存器打回默认（含 ICHG=2040mA），
+     * 随后立即关看门狗并重新编程，故无副作用。WD_RST 完成后自动清 0。 */
+    if (bq_read_reg(BQ25601_REG01, &val) == 0) {
+        bq_write_reg(BQ25601_REG01, val | BIT(6));
+        k_msleep(10); /* 等待复位完成 */
+    }
+
+    /* 第二步：关看门狗（WATCHDOG=00），使 host 模式永久保持，
+     * 不会因喂狗超时掉回 default 模式（default 下 PSEL 会钳流）。 */
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
-        val &= ~(BIT(5) | BIT(4)); /* WATCHDOG[1:0] = 00 关闭 */
+        val &= ~(BIT(5) | BIT(4));
         bq_write_reg(BQ25601_REG05, val);
     }
+
+    /* 第三步：屏蔽 VINDPM/IINDPM 中断（REG0A 高 6 位只读，写回无副作用） */
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
-        val |= BIT(1) | BIT(0); /* 屏蔽 VINDPM / IINDPM INT 脉冲 */
+        val |= BIT(1) | BIT(0);
         bq_write_reg(BQ25601_REG0A, val);
     }
 }
