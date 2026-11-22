@@ -2,17 +2,8 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-21（第五轮）：拔线清零立即回主屏；充满未拔线停留；显示值每轮
- *   回读芯片寄存器；HID 就绪门槛；2 秒判定窗口；IINDPM 偏移 100mA 编码；
- *   ICHG 60mA 步进取整；REG08 真实充电阶段；看门狗关闭；REG09 双读清故障；
- *   REG0A 屏蔽 DPM 中断。
- * 2026-11-22（2B）：INT 改设备树 int-gpios 可选（P0/P1）；I2C 总线跟随节点。
- * 2026-11-22（提速）：新增 therm_stat（REG08[1]）上报，供充电屏热标志。
- * 2026-11-22（host 模式修复）：恢复 WD_RST=1 进入 host 模式。
- *   BQ25601 无 ILIM 引脚，输入限流由 IINDPM 寄存器决定，但 default 模式下
- *   PSEL 引脚会实时覆盖 IINDPM（PSEL=高→钳死 500mA）。必须写 WD_RST=1 转入
- *   host 模式、再关看门狗保持，IINDPM 写入才能生效。此前误删该脉冲导致
- *   充电电流被钳在 500mA。
+ * 2026-11-22：在 host 模式修复基础上，新增 CONFIG_OWLET_CHARGER_DEBUG
+ *   诊断分支：每轮回读 REG00/05/08/09/0A 原始值上报，供屏幕显示定位。
  */
 
 #include <zephyr/kernel.h>
@@ -82,24 +73,16 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
 static void bq25601_init_regs(void) {
     uint8_t val;
 
-    /* 第一步：写 WD_RST=1 进入 host 模式（BQ25601 的唯一入口）。
-     * 该操作会把"看门狗可复位"寄存器打回默认（含 ICHG=2040mA），
-     * 随后立即关看门狗并重新编程，故无副作用。WD_RST 完成后自动清 0。 */
     if (bq_read_reg(BQ25601_REG01, &val) == 0) {
-        bq_write_reg(BQ25601_REG01, val | BIT(6));
-        k_msleep(10); /* 等待复位完成 */
+        bq_write_reg(BQ25601_REG01, val | BIT(6)); /* WD_RST=1 进 host 模式 */
+        k_msleep(10);
     }
-
-    /* 第二步：关看门狗（WATCHDOG=00），使 host 模式永久保持，
-     * 不会因喂狗超时掉回 default 模式（default 下 PSEL 会钳流）。 */
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
-        val &= ~(BIT(5) | BIT(4));
+        val &= ~(BIT(5) | BIT(4)); /* WATCHDOG=00 保持 host 模式 */
         bq_write_reg(BQ25601_REG05, val);
     }
-
-    /* 第三步：屏蔽 VINDPM/IINDPM 中断（REG0A 高 6 位只读，写回无副作用） */
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
-        val |= BIT(1) | BIT(0);
+        val |= BIT(1) | BIT(0); /* 屏蔽 DPM 中断 */
         bq_write_reg(BQ25601_REG0A, val);
     }
 }
@@ -148,7 +131,6 @@ static uint16_t read_iindpm_actual_ma(void) {
     return 0;
 }
 
-/* REG08[4:3]：00 未充电 / 01 预充 / 10 快充 / 11 充电完成 */
 static uint8_t read_chrg_stat(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG08, &val) == 0) {
@@ -157,7 +139,6 @@ static uint8_t read_chrg_stat(void) {
     return 0;
 }
 
-/* REG08[1] THERM_STAT：1=芯片处于热调节（自动降流） */
 static uint8_t read_therm_stat(void) {
     uint8_t val;
     if (bq_read_reg(BQ25601_REG08, &val) == 0) {
@@ -236,6 +217,14 @@ static void poll_handler(struct k_work *work) {
     charger_ev.battery_soc = read_battery_soc();
     charger_ev.battery_voltage_mv = read_battery_voltage_mv();
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
+
+#if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
+    bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
+    bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+    bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
+    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
+    bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
+#endif
 
     raise_owlet_charger_state_changed(charger_ev);
 }
