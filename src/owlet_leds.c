@@ -2,18 +2,13 @@
  * owlet_leds.c
  * 路径：src/owlet_leds.c
  *
- * 2026-11-14 恢复记录：
- *   移除所有睡眠/空闲时的 RGB 保存调用，回归纯指示灯逻辑。
- * 2026-11-21 修改记录：
- *   新增"对方正常离开"识别：ZMK v0.3 的 profile 事件不带断连原因码，
- *   但 Zephyr(v3.5.0+zmk-fixes) 的 bt_conn_cb.disconnected 携带
- *   BT_HCI_ERR_* 原因码，且支持多回调注册，故在本文件注册一份
- *   自己的连接回调，与 ZMK 核心回调并存，无需改动 ZMK。
- *   策略：
- *   - 干净断连(0x13 远端主动断开 / 0x15 远端关机)：快闪两下确认后
- *     熄灭，不再持续闪烁；
- *   - 超时(0x08)及其他原因：维持原有未连接闪烁；
- *   - 重新连接或手动切换 profile：清除干净断连标记，恢复原逻辑。
+ * 2026-11-21：干净断连(0x13/0x15)闪两下后熄灭；超时/其他维持闪烁；
+ *   重连或切 profile 恢复。通过自注册 Zephyr bt_conn_cb 获取断连原因码。
+ * 2026-11-22（2B 模块化）：
+ *   1. 蓝牙灯(led0)改为可选：无 led0 别名时不驱动蓝牙灯，不再 #error。
+ *   2. caps/num 锁定灯本就按 DT 别名可选。
+ *   3. HID 指示灯监听器加 CONFIG_ZMK_HID_INDICATORS 守卫：
+ *      该事件实现文件是条件编译的，关闭时订阅会链接失败，必须守卫。
  */
 
 #include <zephyr/kernel.h>
@@ -42,11 +37,11 @@ LOG_MODULE_REGISTER(owlet_leds, CONFIG_ZMK_LOG_LEVEL);
 #define OWLET_CONFIRM_TOGGLE_MS   120
 #define OWLET_CONFIRM_TOGGLES     4
 
-#define BLE_LED_NODE DT_ALIAS(led0)
-#if !DT_NODE_EXISTS(BLE_LED_NODE)
-#error "owlet_leds: 缺少 aliases { led0 = <&blue_led>; }"
+/* 蓝牙灯可选 */
+#if DT_NODE_EXISTS(DT_ALIAS(led0))
+#define OWLET_HAS_BLE_LED 1
+static const struct gpio_dt_spec ble_led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 #endif
-static const struct gpio_dt_spec ble_led = GPIO_DT_SPEC_GET(BLE_LED_NODE, gpios);
 
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
 #define CAPS_LED_NODE DT_ALIAS(caps_led)
@@ -58,7 +53,9 @@ static const struct gpio_dt_spec caps_led = GPIO_DT_SPEC_GET(CAPS_LED_NODE, gpio
 static const struct gpio_dt_spec num_led = GPIO_DT_SPEC_GET(NUM_LED_NODE, gpios);
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 static uint32_t cached_hid_indicators = 0;
+#endif
 
 static struct k_work_delayable ble_blink_work;
 static bool ble_work_running;
@@ -72,7 +69,9 @@ static uint8_t last_profile_index;
 static void ble_led_set(bool on)
 {
     if (on == ble_led_is_on) return;
+#if OWLET_HAS_BLE_LED
     if (gpio_pin_set_dt(&ble_led, on ? 1 : 0) < 0) return;
+#endif
     ble_led_is_on = on;
 }
 
@@ -88,7 +87,6 @@ static void ble_led_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
-    /* 干净断连后的两下确认闪烁，结束后自然熄灭 */
     if (confirm_toggles_left > 0) {
         ble_led_set(!ble_led_is_on);
         confirm_toggles_left--;
@@ -100,7 +98,6 @@ static void ble_led_work_handler(struct k_work *work)
         ble_led_set(false);
         k_work_reschedule(&ble_blink_work, K_MSEC(CONFIG_OWLET_BLE_LED_POLL_MS));
     } else if (peer_left_clean) {
-        /* 对方正常离开：保持熄灭，仅低频复查连接状态 */
         ble_led_set(false);
         k_work_reschedule(&ble_blink_work, K_MSEC(CONFIG_OWLET_BLE_LED_POLL_MS));
     } else {
@@ -110,7 +107,9 @@ static void ble_led_work_handler(struct k_work *work)
 }
 
 static void ble_led_start(void) {
+#if OWLET_HAS_BLE_LED
     if (!ble_work_running) { ble_work_running = true; k_work_reschedule(&ble_blink_work, K_NO_WAIT); }
+#endif
 }
 static void ble_led_stop(void) {
     if (ble_work_running) { ble_work_running = false; k_work_cancel_delayable(&ble_blink_work); }
@@ -125,7 +124,6 @@ static void owlet_bt_connected(struct bt_conn *conn, uint8_t err)
     if (err) {
         return;
     }
-    /* 重新连上：清除干净断连标记，恢复正常逻辑 */
     peer_left_clean = false;
     confirm_toggles_left = 0;
 }
@@ -136,7 +134,6 @@ static void owlet_bt_disconnected(struct bt_conn *conn, uint8_t reason)
 
     if (reason == BT_HCI_ERR_REMOTE_USER_TERM_CONN ||
         reason == BT_HCI_ERR_REMOTE_POWER_OFF) {
-        /* 对方正常离开：先确保灯灭，再闪两下确认，之后保持熄灭 */
         peer_left_clean = true;
         ble_led_set(false);
         confirm_toggles_left = OWLET_CONFIRM_TOGGLES;
@@ -144,7 +141,6 @@ static void owlet_bt_disconnected(struct bt_conn *conn, uint8_t reason)
             k_work_reschedule(&ble_blink_work, K_NO_WAIT);
         }
     } else {
-        /* 超时(0x08)及其他原因：无法区分意外断连，维持原闪烁 */
         peer_left_clean = false;
         confirm_toggles_left = 0;
     }
@@ -168,7 +164,8 @@ static int owlet_ble_profile_cb(const zmk_event_t *eh) {
 ZMK_LISTENER(owlet_ble_led_profile, owlet_ble_profile_cb);
 ZMK_SUBSCRIPTION(owlet_ble_led_profile, zmk_ble_active_profile_changed);
 
-/* ---------- HID 锁定指示灯 ---------- */
+/* ---------- HID 锁定指示灯（仅 CONFIG_ZMK_HID_INDICATORS 启用时） ---------- */
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 static int owlet_hid_indicators_cb(const zmk_event_t *eh) {
     const struct zmk_hid_indicators_changed *ev = as_zmk_hid_indicators_changed(eh);
     if (!ev) return ZMK_EV_EVENT_BUBBLE;
@@ -183,6 +180,7 @@ static int owlet_hid_indicators_cb(const zmk_event_t *eh) {
 }
 ZMK_LISTENER(owlet_hid_led, owlet_hid_indicators_cb);
 ZMK_SUBSCRIPTION(owlet_hid_led, zmk_hid_indicators_changed);
+#endif /* CONFIG_ZMK_HID_INDICATORS */
 
 /* ---------- 睡眠/唤醒 ---------- */
 static int owlet_activity_cb(const zmk_event_t *eh) {
@@ -198,12 +196,14 @@ static int owlet_activity_cb(const zmk_event_t *eh) {
 #endif
         } else {
             ble_led_start();
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
             gpio_pin_set_dt(&caps_led, (cached_hid_indicators & OWLET_HID_INDICATOR_CAPS_LOCK) ? 1 : 0);
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(num_led))
             gpio_pin_set_dt(&num_led, (cached_hid_indicators & OWLET_HID_INDICATOR_NUM_LOCK) ? 1 : 0);
 #endif
+#endif /* CONFIG_ZMK_HID_INDICATORS */
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
@@ -212,16 +212,18 @@ ZMK_LISTENER(owlet_ble_led_activity, owlet_activity_cb);
 ZMK_SUBSCRIPTION(owlet_ble_led_activity, zmk_activity_state_changed);
 
 static int owlet_leds_init(void) {
-    if (!device_is_ready(ble_led.port)) return -ENODEV;
-    gpio_pin_configure_dt(&ble_led, GPIO_OUTPUT_INACTIVE);
-    ble_led_is_on = false;
     k_work_init_delayable(&ble_blink_work, ble_led_work_handler);
-
     last_profile_index = zmk_ble_active_profile_index();
     /* 与 ZMK 核心的连接回调并存，Zephyr 支持多回调注册 */
     bt_conn_cb_register(&owlet_conn_cb);
 
+#if OWLET_HAS_BLE_LED
+    if (!device_is_ready(ble_led.port)) return -ENODEV;
+    gpio_pin_configure_dt(&ble_led, GPIO_OUTPUT_INACTIVE);
+    ble_led_is_on = false;
     ble_led_start();
+#endif
+
 #if DT_NODE_EXISTS(DT_ALIAS(caps_led))
     if (device_is_ready(caps_led.port)) gpio_pin_configure_dt(&caps_led, GPIO_OUTPUT_INACTIVE);
 #endif
