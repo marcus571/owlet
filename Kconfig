@@ -2,9 +2,7 @@
 # 仓库根目录的 Kconfig
 # 路径：Kconfig
 #
-# 2026-11-22：OWLET_BLE_LED_POLL_MS 默认 500→1000（省电微优化，
-#   蓝牙灯为板级定死件，此默认值服务所有键盘）。
-#   INT 引脚配置项已移除（改设备树 int-gpios）。
+# 2026-11-22：新增 OWLET_CHARGER_DEBUG 诊断开关（临时排查用）。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -64,5 +62,9 @@ config OWLET_CHARGER_DCP_ICHG_MA
 config OWLET_CHARGER_POLL_INTERVAL_MS
 	int "充电状态轮询间隔 (ms)"
 	default 15000
+
+config OWLET_CHARGER_DEBUG
+	bool "充电寄存器诊断显示（排查用，正常关闭）"
+	default n
 
 endif # OWLET_USB_CHARGER_SWITCH
