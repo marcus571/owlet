@@ -1,7 +1,6 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-22：诊断布局左 IIN/09/08，右 07/0A/05。
-//   REG09 全字节用于解出挂起充电的故障类型（红灯 1Hz 闪=charge suspend）。
+// 2026-11-22：诊断布局左 IIN/09/08，右 06/0A/05（06 用于确认 OVP 阈值）。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -45,7 +44,7 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
     lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "07:%02X", state->dbg_reg07);
+    snprintf(text, sizeof(text), "06:%02X", state->dbg_reg06);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
     snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
