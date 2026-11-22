@@ -1,7 +1,7 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-22：诊断布局 IIN/ICH/0A（左）与 08/05/07（右），被动回读。
-//   右栏第三行由 WD 改为 REG07 完整值，观察 IINDET_EN(bit7) 是否自动回 0。
+// 2026-11-22：诊断布局左 IIN/09/08，右 07/0A/05。
+//   REG09 全字节用于解出挂起充电的故障类型（红灯 1Hz 闪=charge suspend）。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -39,19 +39,19 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "IIN:%u", iin);
     lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "ICH:%u", state->ichg_ma);
+    snprintf(text, sizeof(text), "09:%02X", state->dbg_reg09);
     lv_canvas_draw_text(canvas, 4, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
+    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
     lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
+    snprintf(text, sizeof(text), "07:%02X", state->dbg_reg07);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
+    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "07:%02X", state->dbg_reg07);
+    snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
     lv_canvas_draw_text(canvas, 84, 48, 76, &label_dsc, text);
     return;
 #endif
