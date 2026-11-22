@@ -2,7 +2,7 @@ file_format: "1"
 id: owlet_view
 name: Owlet View
 type: shield
-url: https://github.com/marcus571/owlet-pro
+url: https://github.com/marcus571/owlet
 requires: [nice_view_header]
 features:
   - display
