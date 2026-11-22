@@ -1,13 +1,11 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-21：电压行 VBAT 保留 V 后缀，去调试计数器。
-// 2026-11-22：Chg 行追加热调节标志 T（therm_stat=1 时显示 "Chg:FST T"）。
+// 2026-11-22：新增 CONFIG_OWLET_CHARGER_DEBUG 诊断布局，显示芯片真实寄存器。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
 #include <stdio.h>
 
-/* 提取并格式化电流值 */
 static void format_current(char *buf, size_t len, uint16_t current_ma) {
     if (current_ma < 1000) {
         snprintf(buf, len, "%umA", current_ma);
@@ -16,7 +14,6 @@ static void format_current(char *buf, size_t len, uint16_t current_ma) {
     }
 }
 
-/* 提取并格式化时间值 */
 static void format_duration(char *buf, size_t len, uint32_t seconds) {
     uint32_t mins = seconds / 60;
     if (mins < 60) {
@@ -32,14 +29,34 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
 
     char text[32];
 
-    /* screen1 专属中分线 (X=80) */
     lv_draw_rect_dsc_t line_dsc;
     init_rect_dsc(&line_dsc, LVGL_FOREGROUND);
     lv_canvas_draw_rect(canvas, 80, 4, 1, 61, &line_dsc);
 
-    /* --- 左栏 (X = 4, 宽 76) --- */
+#if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
+    /* 诊断布局：左 IIN/WD/0A，右 08/ICH/05 */
+    uint16_t iin = (uint16_t)((state->dbg_reg00 & 0x1F) + 1) * 100;
+    snprintf(text, sizeof(text), "IIN:%u", iin);
+    lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    // 1. 充电接口类型
+    snprintf(text, sizeof(text), "WD:%u", (state->dbg_reg09 >> 7) & 1);
+    lv_canvas_draw_text(canvas, 4, 28, 76, &label_dsc, text);
+
+    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
+    lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
+
+    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
+    lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
+
+    snprintf(text, sizeof(text), "ICH:%u", state->ichg_ma);
+    lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
+
+    snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
+    lv_canvas_draw_text(canvas, 84, 48, 76, &label_dsc, text);
+    return;
+#endif
+
+    /* --- 正常布局 --- */
     const char *type_str = "UNK";
     if (state->vbus_stat == 1 || state->vbus_stat == 2) {
         type_str = "USB";
@@ -49,25 +66,19 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "Type:%s", type_str);
     lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    // 2. 设定的充电电流
     char cur_str[16];
     format_current(cur_str, sizeof(cur_str), state->ichg_ma);
     snprintf(text, sizeof(text), "Set:%s", cur_str);
     lv_canvas_draw_text(canvas, 4, 28, 76, &label_dsc, text);
 
-    // 3. 充电时长
     char time_str[16];
     format_duration(time_str, sizeof(time_str), state->charge_duration_s);
     snprintf(text, sizeof(text), "Time:%s", time_str);
     lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
 
-    /* --- 右栏 (X = 84, 宽 76) --- */
-
-    // 1. 电池电量
     snprintf(text, sizeof(text), "SOC:%u%%", state->battery_soc);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
-    // 2. 充电状态（末尾 T = 芯片热调节降流中）
     const char *chrg_str = "IDLE";
     if (state->chrg_stat == 1) {
         chrg_str = "PRE";
@@ -83,7 +94,6 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     }
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
-    // 3. 电池电压
     uint16_t mv = state->battery_voltage_mv;
     snprintf(text, sizeof(text), "VBAT:%u.%02uV", mv / 1000, (mv % 1000) / 10);
     lv_canvas_draw_text(canvas, 84, 48, 76, &label_dsc, text);
