@@ -2,11 +2,9 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-22（时序修复）：07=4C 证明 IINDET_EN 已被接受并自动清零，即源检测
- *   会完成；但原流程"触发检测→等10ms→写IINDPM"是在检测完成前写，随后被
- *   检测结果按 PSEL 改回 500mA。改为：等 REG07 bit7 自动回 0（检测完成）
- *   后再写 IINDPM/ICHG；且仅在读回值漂移时才重同步，避免自激。
- *   诊断屏显示 REG09 全字节以解出挂起充电的故障类型。
+ * 2026-11-22（过压修复）：09=10/0A 的 ACOV 证实为输入过压尖峰反复挂起充电。
+ *   1. REG06 OVP 阈值 6.5V→10.5V（输入恒为 5V，10.5V 仍有保护）。
+ *   2. 重同步限流为每 60s 最多一次，避免 INT 驱动的电流阶跃制造过压尖峰。
  */
 
 #include <zephyr/kernel.h>
@@ -33,6 +31,7 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601_REG01          0x01
 #define BQ25601_REG02          0x02
 #define BQ25601_REG05          0x05
+#define BQ25601_REG06          0x06
 #define BQ25601_REG07          0x07
 #define BQ25601_REG08          0x08
 #define BQ25601_REG09          0x09
@@ -43,9 +42,9 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define REG02_ICHG_MASK        0x3F
 #define REG07_IINDET_EN        BIT(7)
 
-/* 源检测最长等待（ms）：每 5ms 查一次 REG07 bit7，最多 100 次 */
 #define OWLET_INDET_POLL_MS    5
 #define OWLET_INDET_MAX_POLLS  100
+#define OWLET_RESYNC_MIN_MS    60000   /* 重同步最小间隔，抑制电流阶跃 */
 
 #define MAX17048_ADDR          0x36
 #define MAX17048_REG_VCELL     0x02
@@ -64,9 +63,9 @@ static struct gpio_callback charger_int_cb;
 
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
+static int64_t last_resync_uptime;
 static bool powered;
 static bool hid_refreshed;
-static bool indet_timeout;
 
 static struct owlet_charger_state_changed charger_ev;
 
@@ -90,16 +89,21 @@ static void bq25601_enter_host_mode(void) {
     }
 }
 
-/* 触发一次源检测并等待其完成（REG07 bit7 自动回 0）。
- * 超时则置 indet_timeout 供诊断，仍继续后续写入。 */
+/* OVP 阈值抬到 10.5V（REG06[7:6]=10），放过 5V 线上的瞬态尖峰 */
+static void bq25601_set_ovp_10v5(void) {
+    uint8_t val;
+    if (bq_read_reg(BQ25601_REG06, &val) == 0) {
+        val = (uint8_t)((val & 0x3F) | 0x80); /* bit7=1,bit6=0 → OVP=10 (10.5V) */
+        bq_write_reg(BQ25601_REG06, val);
+    }
+}
+
 static void bq25601_detect_and_wait(void) {
     uint8_t val;
 
-    indet_timeout = false;
     if (bq_read_reg(BQ25601_REG07, &val) != 0) {
         return;
     }
-    /* 已置位则先清一下，保证本次触发是干净的一次检测 */
     if (val & REG07_IINDET_EN) {
         bq_write_reg(BQ25601_REG07, (uint8_t)(val & ~REG07_IINDET_EN));
         k_msleep(OWLET_INDET_POLL_MS);
@@ -115,15 +119,15 @@ static void bq25601_detect_and_wait(void) {
             continue;
         }
         if ((val & REG07_IINDET_EN) == 0) {
-            return; /* 检测完成 */
+            return;
         }
     }
-    indet_timeout = true;
 }
 
 static void bq25601_init_regs(void) {
     uint8_t val;
     bq25601_enter_host_mode();
+    bq25601_set_ovp_10v5();
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
         val |= BIT(1) | BIT(0);
         bq_write_reg(BQ25601_REG0A, val);
@@ -141,7 +145,6 @@ static uint16_t ichg_round_to_step(uint16_t ma) {
 static void configure_charger(uint16_t iindpm, uint16_t ichg) {
     uint16_t code;
 
-    /* 关键：先触发并等待源检测完成，再写 IINDPM，避免被检测结果覆盖 */
     bq25601_detect_and_wait();
 
     code = (iindpm > 100) ? ((iindpm - 100) / 100) : 0;
@@ -218,7 +221,7 @@ static void poll_handler(struct k_work *work) {
     k_work_reschedule(&poll_work, K_MSEC(CONFIG_OWLET_CHARGER_POLL_INTERVAL_MS));
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09); /* 清故障前的完整故障寄存器 */
+    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
 #endif
 
     bq25601_clear_faults();
@@ -248,9 +251,11 @@ static void poll_handler(struct k_work *work) {
         uint16_t cur_iindpm = (uint16_t)((reg00_now & REG00_IINDPM_MASK) + 1) * 100;
         uint16_t cur_ichg = read_ichg_actual_ma();
 
-        /* 仅在漂移时重同步（检测+等待+写），稳定时不打扰芯片 */
-        if (cur_iindpm != target_iindpm || cur_ichg != target_ichg) {
+        /* 重同步限流：每 60s 最多一次，避免高频电流阶跃诱发过压尖峰 */
+        if ((cur_iindpm != target_iindpm || cur_ichg != target_ichg) &&
+            (k_uptime_get() - last_resync_uptime) >= OWLET_RESYNC_MIN_MS) {
             configure_charger(target_iindpm, target_ichg);
+            last_resync_uptime = k_uptime_get();
             cur_ichg = read_ichg_actual_ma();
         }
 
@@ -273,6 +278,7 @@ static void poll_handler(struct k_work *work) {
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+    bq_read_reg(BQ25601_REG06, &charger_ev.dbg_reg06);
     bq_read_reg(BQ25601_REG07, &charger_ev.dbg_reg07);
     bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
     bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
@@ -298,6 +304,7 @@ static void publish_initial_state(void) {
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
     bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
     bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+    bq_read_reg(BQ25601_REG06, &charger_ev.dbg_reg06);
     bq_read_reg(BQ25601_REG07, &charger_ev.dbg_reg07);
     bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
     bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
@@ -316,6 +323,7 @@ static int usb_switch_cb(const zmk_event_t *eh) {
             powered = true;
             hid_refreshed = false;
             charge_start_time = k_uptime_get();
+            last_resync_uptime = 0; /* 允许插电后立即首次重同步 */
 
             bq25601_enter_host_mode();
 
