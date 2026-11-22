@@ -1,6 +1,7 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-22：诊断布局 IIN/ICH/0A/08/05/WD（被动回读，无强写）。
+// 2026-11-22：诊断布局 IIN/ICH/0A（左）与 08/05/07（右），被动回读。
+//   右栏第三行由 WD 改为 REG07 完整值，观察 IINDET_EN(bit7) 是否自动回 0。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -50,7 +51,7 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "WD:%u", (state->dbg_reg09 >> 7) & 1);
+    snprintf(text, sizeof(text), "07:%02X", state->dbg_reg07);
     lv_canvas_draw_text(canvas, 84, 48, 76, &label_dsc, text);
     return;
 #endif
