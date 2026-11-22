@@ -1,0 +1,11 @@
+file_format: "1"
+id: owlet_0
+name: Owlet 0
+type: shield
+url: https://github.com/marcus571/owlet
+requires: []
+features:
+  - keys
+  - encoder
+  - underglow
+  - nice_view_header
