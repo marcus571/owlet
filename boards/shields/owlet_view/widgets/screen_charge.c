@@ -1,6 +1,6 @@
 // boards/shields/owlet_view/widgets/screen_charge.c
 //
-// 2026-11-22：诊断布局左 IIN/09/08，右 06/0A/05（06 用于确认 OVP 阈值）。
+// 2026-11-22：诊断布局左 RST/IIN/09，右 08/06/05。RST=WD_RST 后回读的 ICHG。
 #include "screen_charge.h"
 #include "util.h"
 #include "../assets/custom_fonts.h"
@@ -34,20 +34,20 @@ void draw_charge_screen(lv_obj_t *canvas, const struct owlet_charger_state_chang
     lv_canvas_draw_rect(canvas, 80, 4, 1, 61, &line_dsc);
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    uint16_t iin = (uint16_t)((state->dbg_reg00 & 0x1F) + 1) * 100;
-    snprintf(text, sizeof(text), "IIN:%u", iin);
+    snprintf(text, sizeof(text), "RST:%u", state->dbg_rst_ichg);
     lv_canvas_draw_text(canvas, 4, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "09:%02X", state->dbg_reg09);
+    uint16_t iin = (uint16_t)((state->dbg_reg00 & 0x1F) + 1) * 100;
+    snprintf(text, sizeof(text), "IIN:%u", iin);
     lv_canvas_draw_text(canvas, 4, 28, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
+    snprintf(text, sizeof(text), "09:%02X", state->dbg_reg09);
     lv_canvas_draw_text(canvas, 4, 48, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "06:%02X", state->dbg_reg06);
+    snprintf(text, sizeof(text), "08:%02X", state->dbg_reg08);
     lv_canvas_draw_text(canvas, 84, 8, 76, &label_dsc, text);
 
-    snprintf(text, sizeof(text), "0A:%02X", state->dbg_reg0a);
+    snprintf(text, sizeof(text), "06:%02X", state->dbg_reg06);
     lv_canvas_draw_text(canvas, 84, 28, 76, &label_dsc, text);
 
     snprintf(text, sizeof(text), "05:%02X", state->dbg_reg05);
