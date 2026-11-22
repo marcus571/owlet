@@ -2,8 +2,9 @@
  * owlet_usb_switch.c
  * 路径：src/owlet_usb_switch.c
  *
- * 2026-11-22：在 host 模式修复基础上，新增 CONFIG_OWLET_CHARGER_DEBUG
- *   诊断分支：每轮回读 REG00/05/08/09/0A 原始值上报，供屏幕显示定位。
+ * 2026-11-22：诊断实验版——DEBUG 开启时每轮强制重进 host 模式、重写
+ *   IINDPM=1200/ICHG=1200 并立即回读，另读 REG01/07/0B 定位钳流根因。
+ *   正常版（DEBUG 关）逻辑不变。
  */
 
 #include <zephyr/kernel.h>
@@ -30,9 +31,11 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 #define BQ25601_REG01          0x01
 #define BQ25601_REG02          0x02
 #define BQ25601_REG05          0x05
+#define BQ25601_REG07          0x07
 #define BQ25601_REG08          0x08
 #define BQ25601_REG09          0x09
 #define BQ25601_REG0A          0x0A
+#define BQ25601_REG0B          0x0B
 
 #define REG00_IINDPM_MASK      0x1F
 #define REG02_ICHG_MASK        0x3F
@@ -74,15 +77,15 @@ static void bq25601_init_regs(void) {
     uint8_t val;
 
     if (bq_read_reg(BQ25601_REG01, &val) == 0) {
-        bq_write_reg(BQ25601_REG01, val | BIT(6)); /* WD_RST=1 进 host 模式 */
+        bq_write_reg(BQ25601_REG01, val | BIT(6));
         k_msleep(10);
     }
     if (bq_read_reg(BQ25601_REG05, &val) == 0) {
-        val &= ~(BIT(5) | BIT(4)); /* WATCHDOG=00 保持 host 模式 */
+        val &= ~(BIT(5) | BIT(4));
         bq_write_reg(BQ25601_REG05, val);
     }
     if (bq_read_reg(BQ25601_REG0A, &val) == 0) {
-        val |= BIT(1) | BIT(0); /* 屏蔽 DPM 中断 */
+        val |= BIT(1) | BIT(0);
         bq_write_reg(BQ25601_REG0A, val);
     }
 }
@@ -219,11 +222,33 @@ static void poll_handler(struct k_work *work) {
     charger_ev.charge_duration_s = (uint32_t)(elapsed_ms / 1000);
 
 #if IS_ENABLED(CONFIG_OWLET_CHARGER_DEBUG)
-    bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
-    bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
-    bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
-    bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
-    bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
+    {
+        uint8_t v;
+        /* 实验：强制重进 host 模式 */
+        if (bq_read_reg(BQ25601_REG01, &v) == 0) {
+            bq_write_reg(BQ25601_REG01, v | BIT(6)); /* WD_RST=1 */
+            k_msleep(5);
+        }
+        if (bq_read_reg(BQ25601_REG05, &v) == 0) {
+            bq_write_reg(BQ25601_REG05, v & ~(BIT(5) | BIT(4))); /* 关看门狗 */
+        }
+        /* 强制写 IINDPM=1200(code11)、ICHG=1200(code20) */
+        if (bq_read_reg(BQ25601_REG00, &v) == 0) {
+            bq_write_reg(BQ25601_REG00, (v & ~REG00_IINDPM_MASK) | 11);
+        }
+        if (bq_read_reg(BQ25601_REG02, &v) == 0) {
+            bq_write_reg(BQ25601_REG02, (v & ~REG02_ICHG_MASK) | 20);
+        }
+        /* 立即回读各寄存器 */
+        bq_read_reg(BQ25601_REG00, &charger_ev.dbg_reg00);
+        bq_read_reg(BQ25601_REG01, &charger_ev.dbg_reg01);
+        bq_read_reg(BQ25601_REG05, &charger_ev.dbg_reg05);
+        bq_read_reg(BQ25601_REG07, &charger_ev.dbg_reg07);
+        bq_read_reg(BQ25601_REG08, &charger_ev.dbg_reg08);
+        bq_read_reg(BQ25601_REG09, &charger_ev.dbg_reg09);
+        bq_read_reg(BQ25601_REG0A, &charger_ev.dbg_reg0a);
+        bq_read_reg(BQ25601_REG0B, &charger_ev.dbg_reg0b);
+    }
 #endif
 
     raise_owlet_charger_state_changed(charger_ev);
