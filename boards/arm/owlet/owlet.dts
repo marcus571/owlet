@@ -4,7 +4,8 @@
  * 路径：boards/arm/owlet/owlet.dts
  *
  * 2026-11-22 板/shield 拆分（2A）：键盘差异层移入 boards/shields/owlet_0。
- * 2026-11-22（2B）：bq25601 增加 int-gpios 默认 P0.12，键盘 shield 可覆盖到任意脚。
+ * 2026-11-23（终版）：int-gpios 与 psel-gpios 均为必选、由键盘 shield 声明，
+ *   板级不再给 INT 默认脚（避免"漏声明静默用错脚"）；使能 WDT 节点。
  */
 #include <nordic/nrf52840_qiaa.dtsi>
 #include <dt-bindings/gpio/gpio.h>
@@ -70,13 +71,14 @@
 		compatible = "ti,bq25601";
 		reg = <0x6b>;
 		status = "okay";
-		int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
 	};
 };
 
 &gpiote { status = "okay"; };
 &gpio0  { status = "okay"; };
 &gpio1  { status = "okay"; };
+
+&{/soc/watchdog@40010000} { status = "okay"; };
 
 zephyr_udc0: &usbd {
 	compatible = "nordic,nrf-usbd";
@@ -100,4 +102,3 @@ zephyr_udc0: &usbd {
 		boot_partition: partition@f4000 { label = "adafruit_boot"; reg = <0x000f4000 0x0000c000>; };
 	};
 };
-&{/soc/watchdog@40010000} { status = "okay"; };
