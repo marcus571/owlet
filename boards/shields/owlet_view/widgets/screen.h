@@ -1,4 +1,3 @@
-// boards/shields/nice_view_gem/widgets/screen.h
 #pragma once
 
 #include <lvgl.h>
