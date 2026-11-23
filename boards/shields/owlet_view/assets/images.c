@@ -1,4 +1,3 @@
-// boards/shields/owlet_view/assets/images.c
 #include <lvgl.h>
 
 #ifndef LV_ATTRIBUTE_MEM_ALIGN
