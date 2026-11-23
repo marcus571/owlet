@@ -1,4 +1,3 @@
-// boards/shields/owlet_view/widgets/layer.c
 /*
  * layer.c — 右栏：图层图标 + 动态激活点阵
  *
