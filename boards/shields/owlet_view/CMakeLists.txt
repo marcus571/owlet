@@ -1,6 +1,6 @@
 # ============================================================
 # nice_view_gem CMakeLists.txt
-# 路径：boards/shields/nice_view_gem/CMakeLists.txt
+# 路径：boards/shields/owlet_view/CMakeLists.txt
 # ============================================================
 
 if(CONFIG_ZMK_DISPLAY)
