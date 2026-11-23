@@ -1,10 +1,9 @@
 /*
- * owlet_0 键盘 shield（3×4 技术验证板）
+ * owlet_0 键盘 shield（3×4 技术验证板，新版硬件）
  * 路径：boards/shields/owlet_0/owlet_0.overlay
  *
- * 承载键盘差异层：矩阵/编码器/锁定灯/RGB/屏幕 SPI 总线。
- * 屏幕面板子节点由显示 shield owlet_view 挂到 nice_view_spi 上。
- * 注意：overlay 独立预处理，所需宏的头文件必须在此显式 include。
+ * 2026-11-23：新版走线 SCL 改 P0.11（覆盖板级默认 P0.06）；
+ *   新增 psel-gpios = P0.04（BSS138W 栅极，高=拉低 PSEL=2.4A 档）。
  */
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/led/led.h>
@@ -23,7 +22,6 @@
 		num-led = &num_lock_led;
 	};
 
-	/* 并入板级 leds 节点（devicetree 按路径合并） */
 	leds {
 		compatible = "gpio-leds";
 		caps_lock_led: led_1 { gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>; label = "Caps Lock LED"; };
@@ -82,7 +80,28 @@
 	spi3_sleep: spi3_sleep { group1 { psels = <NRF_PSEL(SPIM_MOSI, 0, 29)>; low-power-enable; }; };
 };
 
-/* 屏幕 SPI 总线：只提供 nice_view_spi 标签，面板子节点由 owlet_view 挂入 */
+/* 新版走线：I2C SCL 覆盖为 P0.11（SDA 保持 P0.26） */
+&pinctrl {
+	i2c0_default: i2c0_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 11)>, <NRF_PSEL(TWIM_SDA, 0, 26)>;
+			bias-pull-up;
+		};
+	};
+	i2c0_sleep: i2c0_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 11)>, <NRF_PSEL(TWIM_SDA, 0, 26)>;
+			bias-pull-up;
+			low-power-enable;
+		};
+	};
+};
+
+/* PSEL 控制：P0.04 → BSS138W 栅极。高=导通=PSEL 低=2.4A 档（充电器） */
+&bq25601 {
+	psel-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+};
+
 nice_view_spi: &spi1 {
 	compatible = "nordic,nrf-spim";
 	status = "okay";
@@ -112,13 +131,3 @@ nice_view_spi: &spi1 {
 		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
 	};
 };
-
-/*
- * 引脚覆盖说明（供未来键盘参照）：
- * 1. I2C SDA/SCL：本板沿用板级默认 P0.06/P0.26。其它键盘改引脚时在本 overlay 覆盖：
- *    &pinctrl {
- *        i2c0_default: i2c0_default { group1 { psels = <NRF_PSEL(TWIM_SCL, 端口, 脚)>, <NRF_PSEL(TWIM_SDA, 端口, 脚)>; bias-pull-up; }; };
- *        i2c0_sleep:   i2c0_sleep   { group1 { psels = <同上>; bias-pull-up; low-power-enable; }; };
- *    };
- * 2. BQ25601 INT：当前仍由 Kconfig 指定(P0.12)，2B 步骤改为设备树 int-gpios 属性后在此覆盖。
- */
