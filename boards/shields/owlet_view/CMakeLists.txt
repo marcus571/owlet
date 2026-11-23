@@ -1,8 +1,3 @@
-# ============================================================
-# owlet_view CMakeLists.txt
-# 路径：boards/shields/owlet_view/CMakeLists.txt
-# ============================================================
-
 if(CONFIG_ZMK_DISPLAY)
   target_sources(app PRIVATE
     custom_status_screen.c       # 核心入口
