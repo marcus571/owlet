@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/widgets/output.c
+// boards/shields/owlet_view/widgets/output.c
 /*
  * output.c — 中栏：大号蓝牙状态图标 + 5 个设备点 + USB 图标
  *
