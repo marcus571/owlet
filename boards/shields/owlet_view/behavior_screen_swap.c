@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/behavior_screen_swap.c
+// boards/shields/owlet_view/behavior_screen_swap.c
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <drivers/behavior.h>
