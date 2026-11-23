@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/widgets/layer.c
+// boards/shields/owlet_view/widgets/layer.c
 /*
  * layer.c — 右栏：图层图标 + 动态激活点阵
  *
