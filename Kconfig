@@ -2,7 +2,8 @@
 # 仓库根目录的 Kconfig
 # 路径：Kconfig
 #
-# 2026-11-22：新增 OWLET_CHARGER_DEBUG 诊断开关（临时排查用）。
+# 2026-11-23（终版）：删除 IINDPM 配置（输入上限改由 PSEL 硬件两档决定）
+#   与诊断开关；新增 MCU 看门狗（PSEL 方案的失效安全兜底）。
 # ============================================================
 
 config OWLET_BLE_LED
@@ -31,7 +32,8 @@ menuconfig OWLET_USB_CHARGER_SWITCH
 	bool "Owlet USB 充电器自动识别与电流配置"
 	default y
 	help
-	  通过 ZMK 的 USB HID 状态判断接口类型，并配置 BQ25601 的输入限流与充电电流。
+	  通过 ZMK 的 USB HID 状态判断接口类型：ICHG 设电池充电电流，
+	  psel-gpios 选择输入上限档（500mA/2.4A）。
 
 if OWLET_USB_CHARGER_SWITCH
 
@@ -40,31 +42,34 @@ config OWLET_CHARGER_I2C_ADDR
 	default 0x6B
 
 config OWLET_CHARGER_DEFAULT_ICHG_MA
-	int "硬件默认充电电流 (mA)，插入瞬间显示用"
+	int "硬件默认充电电流 (mA)，插入瞬间回读失败时显示用"
 	default 500
 
-config OWLET_CHARGER_SDP_IINDPM_MA
-	int "标准电脑口 (SDP) 输入限流 (mA)"
-	default 200
-
 config OWLET_CHARGER_SDP_ICHG_MA
-	int "标准电脑口 (SDP) 电池充电电流 (mA)"
-	default 200
-
-config OWLET_CHARGER_DCP_IINDPM_MA
-	int "专用充电器 (DCP) 输入限流 (mA)"
-	default 400
+	int "电脑 USB 口 (SDP) 电池充电电流 (mA)，60mA 步进"
+	default 600
 
 config OWLET_CHARGER_DCP_ICHG_MA
-	int "专用充电器 (DCP) 电池充电电流 (mA)"
-	default 400
+	int "专用充电器 (DCP) 电池充电电流 (mA)，60mA 步进"
+	default 1200
 
 config OWLET_CHARGER_POLL_INTERVAL_MS
 	int "充电状态轮询间隔 (ms)"
 	default 15000
 
-config OWLET_CHARGER_DEBUG
-	bool "充电寄存器诊断显示（排查用，正常关闭）"
-	default n
-
 endif # OWLET_USB_CHARGER_SWITCH
+
+config OWLET_WDT
+	bool "Owlet MCU 看门狗（跑飞复位后 PSEL 回安全档）"
+	default y
+	select WATCHDOG
+
+if OWLET_WDT
+config OWLET_WDT_TIMEOUT_MS
+	int "看门狗超时 (ms)"
+	default 10000
+
+config OWLET_WDT_FEED_MS
+	int "喂狗周期 (ms)"
+	default 3000
+endif
