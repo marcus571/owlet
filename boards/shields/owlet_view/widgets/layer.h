@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/widgets/layer.h
+// boards/shields/owlet_view/widgets/layer.h
 #pragma once
 
 #include <lvgl.h>
