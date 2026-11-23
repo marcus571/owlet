@@ -1,4 +1,3 @@
-// boards/shields/nice_view_gem/widgets/util.c
 #include <zephyr/kernel.h>
 #include "util.h"
 
