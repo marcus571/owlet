@@ -1,4 +1,3 @@
-// boards/shields/owlet_view/widgets/screen.c
 //
 // 2026-11-21 修改记录（第六轮）：
 //   输出状态增加 usb_hid_ready 字段（取自 zmk_usb_is_hid_ready()），
