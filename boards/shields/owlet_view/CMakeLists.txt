@@ -1,5 +1,5 @@
 # ============================================================
-# nice_view_gem CMakeLists.txt
+# owlet_view CMakeLists.txt
 # 路径：boards/shields/owlet_view/CMakeLists.txt
 # ============================================================
 
