@@ -3,7 +3,7 @@
  * 路径：boards/shields/owlet_0/owlet_0.overlay
  *
  * 2026-11-23：新版走线 SCL 改 P0.11（覆盖板级默认 P0.06）；
- *   新增 psel-gpios = P0.04（BSS138W 栅极，高=拉低 PSEL=2.4A 档）。
+ *   bq25601 两个必选 GPIO 在此声明：INT=P0.12，PSEL 控制=P0.04。
  */
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/led/led.h>
@@ -97,8 +97,10 @@
 	};
 };
 
-/* PSEL 控制：P0.04 → BSS138W 栅极。高=导通=PSEL 低=2.4A 档（充电器） */
+/* 充电芯片两个必选控制脚（本板走线）：
+ * INT = P0.12（开漏低有效）；PSEL 控制 = P0.04（BSS138W 栅极，高=2.4A 档） */
 &bq25601 {
+	int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
 	psel-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
 };
 
