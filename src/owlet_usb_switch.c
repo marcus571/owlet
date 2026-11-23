@@ -6,7 +6,9 @@
  *   （WD_RST/host 模式、IINDET_EN、OVP 抬阈值、IINDPM 写入、诊断回读）。
  *   电流控制两条线：
  *   - ICHG(REG02) 设电池充电电流，写入有效，每轮校验、漂移即重写；
- *   - psel-gpios（必选属性）选输入上限档：高=2.4A（充电器），低=500mA（电脑/默认）。
+ *   - psel-gpios 选输入上限档：高=2.4A（充电器），低=500mA（电脑/默认）。
+ *   int-gpios 与 psel-gpios 均为 binding 必选属性（电源小板固定引出，
+ *   接哪个 GPIO 由键盘 shield 声明），驱动无条件使用，漏声明编译期报错。
  *   顺序保证：先写 ICHG 再拉高 PSEL，避免"限流放开而 ICHG 仍为默认"的瞬态。
  *   保留：UNK 判定窗口、HID 快速刷新、INT 即时刷新、15s 轮询、
  *   REG09 双读清故障、REG0A 屏蔽 DPM、芯片看门狗关闭、热标志、拔线清零。
@@ -51,14 +53,10 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_BUS(BQ25601_NODE));
 
-/* PSEL 档位控制：必选属性，binding 保证存在 */
+/* 两个必选控制脚：binding 保证存在，引脚由键盘 shield 声明 */
 static const struct gpio_dt_spec psel_ctl = GPIO_DT_SPEC_GET(BQ25601_NODE, psel_gpios);
-
-#if DT_NODE_HAS_PROP(BQ25601_NODE, int_gpios)
-#define OWLET_HAS_CHARGER_INT 1
 static const struct gpio_dt_spec charger_int = GPIO_DT_SPEC_GET(BQ25601_NODE, int_gpios);
 static struct gpio_callback charger_int_cb;
-#endif
 
 static struct k_work_delayable poll_work;
 static int64_t charge_start_time;
@@ -264,7 +262,9 @@ static int usb_switch_cb(const zmk_event_t *eh) {
 ZMK_LISTENER(owlet_usb_switch, usb_switch_cb);
 ZMK_SUBSCRIPTION(owlet_usb_switch, zmk_usb_conn_state_changed);
 
-#if OWLET_HAS_CHARGER_INT
+/* BQ25601 INT：开漏低有效 256us 脉冲。
+ * 触发源：输入源识别 / 电源接入与移除 / 充电完成 / 故障（DPM 已屏蔽）。
+ * ISR 中仅安排一次快速刷新，I2C 读取在工作队列中完成。 */
 static void charger_int_isr(const struct device *dev, struct gpio_callback *cb,
                             uint32_t pins) {
     ARG_UNUSED(dev);
@@ -275,7 +275,6 @@ static void charger_int_isr(const struct device *dev, struct gpio_callback *cb,
         k_work_reschedule(&poll_work, K_MSEC(OWLET_INT_REFRESH_DELAY_MS));
     }
 }
-#endif
 
 static int owlet_usb_switch_init(void) {
     k_work_init_delayable(&poll_work, poll_handler);
@@ -287,17 +286,14 @@ static int owlet_usb_switch_init(void) {
 
     bq25601_init_regs();
 
-    /* 初始输出低 = MOSFET 关断 = PSEL 高 = 500mA 安全档 */
+    /* PSEL 初始输出低 = MOSFET 关断 = PSEL 高 = 500mA 安全档 */
     gpio_pin_configure_dt(&psel_ctl, GPIO_OUTPUT_INACTIVE);
 
-#if OWLET_HAS_CHARGER_INT
-    if (device_is_ready(charger_int.port)) {
-        gpio_pin_configure_dt(&charger_int, GPIO_INPUT | GPIO_PULL_UP);
-        gpio_init_callback(&charger_int_cb, charger_int_isr, BIT(charger_int.pin));
-        gpio_add_callback(charger_int.port, &charger_int_cb);
-        gpio_pin_interrupt_configure_dt(&charger_int, GPIO_INT_EDGE_FALLING);
-    }
-#endif
+    /* INT 输入上拉 + 下降沿中断 */
+    gpio_pin_configure_dt(&charger_int, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_init_callback(&charger_int_cb, charger_int_isr, BIT(charger_int.pin));
+    gpio_add_callback(charger_int.port, &charger_int_cb);
+    gpio_pin_interrupt_configure_dt(&charger_int, GPIO_INT_EDGE_FALLING);
 
     return 0;
 }
