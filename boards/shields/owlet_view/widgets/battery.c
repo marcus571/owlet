@@ -1,4 +1,4 @@
-// boards/shields/nice_view_gem/widgets/battery.c
+// boards/shields/owlet_view/widgets/battery.c
 /*
  * battery.c — 左栏：大电池轮廓 + 点阵填充 + 左侧充电闪电 + 百分比文字
  *
