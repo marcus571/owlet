@@ -1,4 +1,3 @@
-// boards/shields/owlet_view/widgets/layer.h
 #pragma once
 
 #include <lvgl.h>
