@@ -100,3 +100,4 @@ zephyr_udc0: &usbd {
 		boot_partition: partition@f4000 { label = "adafruit_boot"; reg = <0x000f4000 0x0000c000>; };
 	};
 };
+&{/soc/watchdog@40010000} { status = "okay"; };
