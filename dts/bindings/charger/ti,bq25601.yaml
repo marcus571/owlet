@@ -2,6 +2,8 @@
 # 驱动见 src/owlet_usb_switch.c，由 CONFIG_OWLET_USB_CHARGER_SWITCH 使能。
 description: |
   TI BQ25601 单节锂电池充电管理芯片。Owlet 电源小板固定使用，I2C 地址 0x6B。
+  电源小板定稿设计带 PSEL 档位开关（BSS138W），psel-gpios 为必选属性：
+  每款键盘 shield 必须声明其控制引脚，漏声明将在设备树编译期报错。
 
 compatible: "ti,bq25601"
 
@@ -16,9 +18,9 @@ properties:
       不声明时驱动退回纯周期轮询。支持任意 GPIO 端口。
   psel-gpios:
     type: phandle-array
-    required: false
+    required: true
     description: |
-      PSEL 档位控制（经 N-MOSFET 低边开关，如 BSS138W）：
+      PSEL 档位控制（经 N-MOSFET 低边开关 BSS138W，必选）：
       置高 = MOSFET 导通 = PSEL 拉低 = 输入限流 2.4A（充电器档）；
       置低 = MOSFET 关断 = PSEL 被上拉 = 输入限流 500mA（电脑档/安全默认）。
-      可选：不声明（PSEL 硬件固定拉高的旧板）时输入恒为 500mA 档。
+      由键盘 shield overlay 按实际走线声明。
