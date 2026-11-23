@@ -6,7 +6,7 @@
  *   （WD_RST/host 模式、IINDET_EN、OVP 抬阈值、IINDPM 写入、诊断回读）。
  *   电流控制两条线：
  *   - ICHG(REG02) 设电池充电电流，写入有效，每轮校验、漂移即重写；
- *   - psel-gpios 选输入上限档：高=2.4A（充电器），低=500mA（电脑/默认）。
+ *   - psel-gpios（必选属性）选输入上限档：高=2.4A（充电器），低=500mA（电脑/默认）。
  *   顺序保证：先写 ICHG 再拉高 PSEL，避免"限流放开而 ICHG 仍为默认"的瞬态。
  *   保留：UNK 判定窗口、HID 快速刷新、INT 即时刷新、15s 轮询、
  *   REG09 双读清故障、REG0A 屏蔽 DPM、芯片看门狗关闭、热标志、拔线清零。
@@ -51,15 +51,13 @@ ZMK_EVENT_IMPL(owlet_charger_state_changed);
 
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_BUS(BQ25601_NODE));
 
+/* PSEL 档位控制：必选属性，binding 保证存在 */
+static const struct gpio_dt_spec psel_ctl = GPIO_DT_SPEC_GET(BQ25601_NODE, psel_gpios);
+
 #if DT_NODE_HAS_PROP(BQ25601_NODE, int_gpios)
 #define OWLET_HAS_CHARGER_INT 1
 static const struct gpio_dt_spec charger_int = GPIO_DT_SPEC_GET(BQ25601_NODE, int_gpios);
 static struct gpio_callback charger_int_cb;
-#endif
-
-#if DT_NODE_HAS_PROP(BQ25601_NODE, psel_gpios)
-#define OWLET_HAS_PSEL 1
-static const struct gpio_dt_spec psel_ctl = GPIO_DT_SPEC_GET(BQ25601_NODE, psel_gpios);
 #endif
 
 static struct k_work_delayable poll_work;
@@ -79,11 +77,7 @@ static int bq_write_reg(uint8_t reg, uint8_t val) {
 
 /* PSEL 档位：true=充电器档(2.4A)，false=电脑档/安全默认(500mA) */
 static void psel_set_charger(bool charger) {
-#if OWLET_HAS_PSEL
     gpio_pin_set_dt(&psel_ctl, charger ? 1 : 0);
-#else
-    ARG_UNUSED(charger);
-#endif
 }
 
 static void bq25601_init_regs(void) {
@@ -293,12 +287,8 @@ static int owlet_usb_switch_init(void) {
 
     bq25601_init_regs();
 
-#if OWLET_HAS_PSEL
-    if (device_is_ready(psel_ctl.port)) {
-        /* 初始输出低 = MOSFET 关断 = PSEL 高 = 500mA 安全档 */
-        gpio_pin_configure_dt(&psel_ctl, GPIO_OUTPUT_INACTIVE);
-    }
-#endif
+    /* 初始输出低 = MOSFET 关断 = PSEL 高 = 500mA 安全档 */
+    gpio_pin_configure_dt(&psel_ctl, GPIO_OUTPUT_INACTIVE);
 
 #if OWLET_HAS_CHARGER_INT
     if (device_is_ready(charger_int.port)) {
